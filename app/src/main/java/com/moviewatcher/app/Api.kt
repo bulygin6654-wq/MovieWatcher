@@ -342,8 +342,8 @@ object Gemini {
             "Ответь ТОЛЬКО JSON-массивом объектов вида " +
             "{\"title\":\"оригинальное название\",\"title_ru\":\"название по-русски\",\"year\":2010,\"type\":\"movie\"}. " +
             "Поле type: movie, tv или anime. Описание пользователя: " + description
-        val model = Keys.geminiModel.ifBlank { "gemini-flash-latest" }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${Keys.gemini}"
+        val models = listOf(Keys.geminiModel.ifBlank { "gemini-flash-latest" }, "gemini-flash-lite-latest", "gemini-2.5-flash")
+            .distinct()
         val body = JSONObject()
             .put(
                 "contents",
@@ -352,7 +352,31 @@ object Gemini {
                 ),
             )
             .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 0.3))
-        val resp = JSONObject(Net.send("POST", url, body.toString()))
+        var raw: String? = null
+        var lastErr: Exception? = null
+        loop@ for (attempt in 0 until 2) {
+            for (model in models) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${Keys.gemini}"
+                try {
+                    raw = Net.send("POST", url, body.toString())
+                    break@loop
+                } catch (e: Exception) {
+                    lastErr = e
+                    val m = e.message.orEmpty()
+                    // 400/401/403 — проблема с ключом или запросом, повторять бессмысленно
+                    if (m.startsWith("HTTP 400") || m.startsWith("HTTP 401") || m.startsWith("HTTP 403")) throw e
+                }
+            }
+            Thread.sleep(2000)
+        }
+        if (raw == null) {
+            val m = lastErr?.message.orEmpty()
+            throw IOException(
+                if (m.startsWith("HTTP 503") || m.startsWith("HTTP 429")) "Gemini сейчас перегружен. Попробуйте через минуту."
+                else m.take(120).ifBlank { "нет ответа" },
+            )
+        }
+        val resp = JSONObject(raw)
         val parts = resp.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
         val text = StringBuilder()
         for (i in 0 until parts.length()) {
