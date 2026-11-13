@@ -85,6 +85,40 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) { runCatching { Keys.fetch(store) } }
             keysVersion++
             loadRecs()
+            fillRuntimes()
+        }
+    }
+
+    /** Дотягивает длительность для просмотренного (для «часов просмотра»), в фоне. */
+    fun fillRuntimes() {
+        viewModelScope.launch {
+            val todo = entries.values.filter { it.status == "watched" && it.runtime == null }.take(400)
+            if (todo.isEmpty()) return@launch
+            val sem = Semaphore(5)
+            val found = withContext(Dispatchers.IO) {
+                coroutineScope {
+                    todo.map { e ->
+                        async {
+                            sem.withPermit {
+                                val p = e.id.split(":")
+                                val m = runCatching {
+                                    if (p[0] == "shiki") Shiki.runtime(p[1].toInt()) else Tmdb.runtime(p[1], p[2].toInt())
+                                }.getOrNull()
+                                e.id to m
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }.filter { it.second != null }.toMap()
+            if (found.isEmpty()) return@launch
+            val map = LinkedHashMap(entries)
+            for ((id, m) in found) {
+                val cur = map[id] ?: continue
+                map[id] = cur.copy(runtime = m)
+            }
+            entries = map
+            store.saveEntries(map)
+            schedulePush()
         }
     }
 
@@ -375,6 +409,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val missed = rows.size - matched.count { it.second != null }
             importMsg = "Готово: добавлено $added из ${rows.size}" +
                 if (missed > 0) ". Не найдено: $missed" else ""
+            fillRuntimes()
         }
     }
 }

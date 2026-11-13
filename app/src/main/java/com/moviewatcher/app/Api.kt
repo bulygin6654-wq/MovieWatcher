@@ -101,6 +101,17 @@ object Tmdb {
         return list.map { parse(it, kind) }.take(20)
     }
 
+    /** Длительность в минутах: фильм — runtime, сериал — серии × длительность серии. */
+    fun runtime(kind: String, id: Int): Int? {
+        val r = call("/$kind/$id")
+        if (kind == "movie") return r.optInt("runtime", 0).takeIf { it > 0 }
+        val eps = r.optInt("number_of_episodes", 0)
+        val per = r.optJSONArray("episode_run_time")?.optInt(0, 0)?.takeIf { it > 0 }
+            ?: r.optJSONObject("last_episode_to_air")?.optInt("runtime", 0)?.takeIf { it > 0 }
+            ?: 0
+        return (eps * per).takeIf { it > 0 }
+    }
+
     private fun hasCyrillic(t: String) = t.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
 
     /** Отзывы пользователей TMDB: сначала русские, потом английские. */
@@ -221,6 +232,11 @@ object Shiki {
             .build().toString()
         val arr = org.json.JSONArray(Net.get(url, headers))
         return arr.objs().map { parse(it) }
+    }
+
+    fun runtime(id: Int): Int? {
+        val o = JSONObject(Net.get("$BASE/api/animes/$id", headers))
+        return (o.optInt("episodes", 0) * o.optInt("duration", 0)).takeIf { it > 0 }
     }
 
     fun similar(id: Int): List<MediaItem> =
