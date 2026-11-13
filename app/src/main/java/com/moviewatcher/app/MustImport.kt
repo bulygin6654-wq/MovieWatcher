@@ -86,7 +86,8 @@ object MustImport {
                 val p = o.optJSONObject("product") ?: continue
                 val type = p.optString("type").lowercase()
                 if (type == "season" || type == "episode" || type == "youtube") continue
-                val title = p.optString("title").ifBlank { continue }
+                val title = p.optString("title")
+                if (title.isBlank()) continue
                 val pidStr = p.opt("id")?.toString() ?: o.optJSONObject("user_product_info")?.opt("product_id")?.toString()
                 val info = o.optJSONObject("user_product_info")
                 val isShow = type == "show" || type == "shows" || pidStr in shows
