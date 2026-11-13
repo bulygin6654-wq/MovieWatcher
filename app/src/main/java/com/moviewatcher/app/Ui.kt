@@ -532,9 +532,9 @@ fun ExploreTab(vm: AppVM, onSearch: () -> Unit) {
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Pill("Фильмы", k == "movie") { vm.setExploreKind("movie") }
-                Pill("Сериалы", k == "tv") { vm.setExploreKind("tv") }
-                Pill("Аниме", k == "anime") { vm.setExploreKind("anime") }
+                Pill("Фильмы", k == "movie") { vm.selectExplore("movie") }
+                Pill("Сериалы", k == "tv") { vm.selectExplore("tv") }
+                Pill("Аниме", k == "anime") { vm.selectExplore("anime") }
             }
         }
         if (vm.exploreLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

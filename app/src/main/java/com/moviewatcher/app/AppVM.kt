@@ -130,7 +130,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // ============ ОБЗОР ============
 
-    fun setExploreKind(k: String) {
+    fun selectExplore(k: String) {
         exploreKind = k
         loadExplore(k)
     }
