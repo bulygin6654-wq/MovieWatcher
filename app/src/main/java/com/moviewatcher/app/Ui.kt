@@ -7,12 +7,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +23,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,8 +56,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -68,35 +73,42 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 
-val Coral = Color(0xFFFF6B6B)
-val Amber = Color(0xFFFFC857)
+val Accent = Color(0xFF3D8BFF)
+val Star = Color(0xFFFFC857)
+val Danger = Color(0xFFFF6B6B)
 
 @Composable
 fun MWTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Coral,
-            onPrimary = Color(0xFF1A0B0B),
-            secondary = Amber,
-            background = Color(0xFF14101F),
-            onBackground = Color(0xFFEDE9F7),
-            surface = Color(0xFF1C1730),
-            onSurface = Color(0xFFEDE9F7),
-            surfaceVariant = Color(0xFF2A2342),
-            onSurfaceVariant = Color(0xFFB9B1D0),
+            primary = Accent,
+            onPrimary = Color.White,
+            secondary = Star,
+            background = Color(0xFF121212),
+            onBackground = Color(0xFFECECEC),
+            surface = Color(0xFF1E1E1E),
+            onSurface = Color(0xFFECECEC),
+            surfaceVariant = Color(0xFF2B2B2B),
+            onSurfaceVariant = Color(0xFFA8A8A8),
+            secondaryContainer = Color(0xFF2B2B2B),
+            onSecondaryContainer = Accent,
         ),
         content = content,
     )
 }
+
+fun f1(d: Double): String = String.format("%.1f", d)
 
 // ============================================================ ROOT
 
@@ -122,33 +134,27 @@ fun App(vm: AppVM) {
         return
     }
 
+    val icons = listOf(Icons.Default.Person, Icons.Default.Search, Icons.Default.Favorite, Icons.Default.Settings)
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 },
-                    icon = { Icon(Icons.Default.Search, null) }, label = { Text("Поиск") },
-                )
-                NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 },
-                    icon = { Icon(Icons.Default.Person, null) }, label = { Text("Мои") },
-                )
-                NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
-                    icon = { Icon(Icons.Default.Favorite, null) }, label = { Text("Вместе") },
-                )
-                NavigationBarItem(
-                    selected = tab == 3, onClick = { tab = 3 },
-                    icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Ещё") },
-                )
+            NavigationBar(containerColor = Color(0xFF181818)) {
+                icons.forEachIndexed { i, icon ->
+                    NavigationBarItem(
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        icon = { Icon(icon, null) },
+                        alwaysShowLabel = false,
+                    )
+                }
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> SearchTab(vm)
-                1 -> MyTab(vm)
+                0 -> MyTab(vm)
+                1 -> SearchTab(vm)
                 2 -> TogetherTab(vm)
                 else -> SettingsTab(vm)
             }
@@ -162,7 +168,7 @@ fun App(vm: AppVM) {
 fun Poster(url: String?, title: String, modifier: Modifier) {
     Box(
         modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
@@ -179,35 +185,46 @@ fun Poster(url: String?, title: String, modifier: Modifier) {
     }
 }
 
+/** Тёмная плашка на постере. star = true — перед текстом жёлтая звезда. */
 @Composable
-fun ItemRow(item: MediaItem, badge: String? = null, onClick: () -> Unit) {
+fun PosterBadge(text: String, star: Boolean, modifier: Modifier = Modifier) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xCC000000))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Poster(item.poster, item.title, Modifier.width(56.dp).height(84.dp))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                item.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            val sub = listOfNotNull(item.year, kindLabel(item.kind).ifBlank { null }).joinToString(" · ")
-            if (sub.isNotBlank()) {
-                Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (item.original != null) {
-                Text(
-                    item.original, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        if (star) Text("★ ", color = Star, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun PosterCard(
+    title: String,
+    poster: String?,
+    year: String?,
+    rating: String?,
+    mark: String?,
+    showTitle: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(Modifier.clickable(onClick = onClick)) {
+        Box {
+            Poster(poster, title, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
+            if (rating != null) PosterBadge(rating, true, Modifier.align(Alignment.TopEnd).padding(6.dp))
+            if (mark != null) PosterBadge(mark, false, Modifier.align(Alignment.TopStart).padding(6.dp))
         }
-        Spacer(Modifier.width(8.dp))
-        if (badge != null) {
-            Text(badge, color = Coral, style = MaterialTheme.typography.titleSmall)
-        } else if (item.rating != null) {
-            Text("★ " + String.format("%.1f", item.rating), color = Amber, style = MaterialTheme.typography.titleSmall)
+        if (showTitle) {
+            Text(
+                title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            if (year != null) {
+                Text(year, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -215,22 +232,42 @@ fun ItemRow(item: MediaItem, badge: String? = null, onClick: () -> Unit) {
 @Composable
 fun Hint(text: String) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 11.dp),
+    ) {
         Text(
-            text, textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text, fontWeight = FontWeight.Bold,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+fun markOf(e: Entry?): String? = when (e?.status) {
+    "watched" -> "✓"
+    "want" -> "Хочу"
+    else -> null
 }
 
 // ============================================================ SEARCH
 
 @Composable
 fun SearchTab(vm: AppVM) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = vm.query,
             onValueChange = { vm.onQuery(it) },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            shape = RoundedCornerShape(14.dp),
             placeholder = { Text("Фильм, сериал или аниме") },
             singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, null) },
@@ -240,14 +277,17 @@ fun SearchTab(vm: AppVM) {
                 }
             },
         )
-        Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             listOf("all" to "Всё", "movie" to "Фильмы", "tv" to "Сериалы", "anime" to "Аниме").forEach { (k, l) ->
                 FilterChip(selected = vm.filter == k, onClick = { vm.onFilter(k) }, label = { Text(l) })
             }
         }
 
         if (vm.query.isBlank()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Подборка для вас", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 IconButton(onClick = { vm.loadRecs() }) { Icon(Icons.Default.Refresh, null) }
             }
@@ -255,9 +295,7 @@ fun SearchTab(vm: AppVM) {
             if (vm.recs.isEmpty() && !vm.recsLoading) {
                 Hint("Отметьте несколько просмотренных фильмов с оценкой — здесь появятся похожие рекомендации для вас обоих.")
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(vm.recs, key = { it.id }) { ItemRow(it) { vm.open(it) } }
-                }
+                ItemGrid(vm, vm.recs)
             }
         } else {
             if (vm.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -265,33 +303,186 @@ fun SearchTab(vm: AppVM) {
             if (vm.results.isEmpty() && err != null && !vm.searching) {
                 Hint(err)
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(vm.results, key = { it.id }) { ItemRow(it) { vm.open(it) } }
+                ItemGrid(vm, vm.results)
+            }
+        }
+    }
+}
+
+@Composable
+fun ItemGrid(vm: AppVM, list: List<MediaItem>) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        items(list, key = { it.id }) { item ->
+            PosterCard(
+                title = item.title, poster = item.poster, year = item.year,
+                rating = item.rating?.let { f1(it) },
+                mark = markOf(vm.entries[item.id]),
+                showTitle = true,
+            ) { vm.open(item) }
+        }
+    }
+}
+
+// ============================================================ MY PROFILE
+
+@Composable
+fun StatCard(value: String, label: String) {
+    Box(
+        Modifier
+            .width(130.dp).height(110.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+    ) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+            Text(value, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun CountBlock(count: Int, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("$count", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun MyTab(vm: AppVM) {
+    var sub by remember { mutableIntStateOf(0) }
+    val all = vm.entries.values
+    val want = all.filter { it.status == "want" }.sortedByDescending { it.ts }
+    val watched = all.filter { it.status == "watched" }.sortedByDescending { it.ts }
+    val series = all.filter { it.kind == "tv" || it.kind == "anime" }.sortedByDescending { it.ts }
+
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            vm.myName.ifBlank { "Мой профиль" },
+            fontSize = 30.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            CountBlock(want.size, "Посмотрю")
+            CountBlock(watched.size, "Просмотрены")
+            CountBlock(series.size, "Сериалы")
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Pill("Посмотрю", sub == 0) { sub = 0 }
+            Pill("Просмотрен", sub == 1) { sub = 1 }
+            Pill("Сериалы", sub == 2) { sub = 2 }
+            Pill("Информация", sub == 3) { sub = 3 }
+        }
+
+        if (sub == 3) {
+            InfoTab(vm)
+        } else {
+            val list = when (sub) {
+                0 -> want
+                1 -> watched
+                else -> series
+            }
+            if (list.isEmpty()) {
+                Hint(
+                    when (sub) {
+                        0 -> "Пока пусто. Найдите фильм и нажмите «Хочу посмотреть»."
+                        1 -> "Пока пусто. Отметьте просмотренное или импортируйте из Must в разделе «Ещё»."
+                        else -> "Сериалов и аниме в ваших списках пока нет."
+                    },
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(list, key = { it.id }) { e ->
+                        PosterCard(
+                            title = e.title, poster = e.poster, year = e.year,
+                            rating = e.rating?.toString(),
+                            mark = if (sub == 2) markOf(e) else null,
+                            showTitle = false,
+                        ) { vm.open(e.toItem()) }
+                    }
                 }
             }
         }
     }
 }
 
-// ============================================================ MY LISTS
-
 @Composable
-fun MyTab(vm: AppVM) {
-    var sub by remember { mutableIntStateOf(0) }
-    val want = vm.entries.values.filter { it.status == "want" }.sortedByDescending { it.ts }
-    val watched = vm.entries.values.filter { it.status == "watched" }.sortedByDescending { it.ts }
-    Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = sub, containerColor = MaterialTheme.colorScheme.background) {
-            Tab(selected = sub == 0, onClick = { sub = 0 }, text = { Text("Хочу (${want.size})") })
-            Tab(selected = sub == 1, onClick = { sub = 1 }, text = { Text("Просмотрено (${watched.size})") })
+fun InfoTab(vm: AppVM) {
+    val all = vm.entries.values
+    val watched = all.filter { it.status == "watched" }
+    val rated = watched.mapNotNull { it.rating }
+    val hours = watched.sumOf { it.runtime ?: 0 } / 60.0
+    val avg = if (rated.isEmpty()) "–" else f1(rated.average())
+    val counts = (1..10).map { n -> rated.count { it == n } }
+    val maxCount = (counts.maxOrNull() ?: 0).coerceAtLeast(1)
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            StatCard("${watched.size}", "Просмотрено")
+            StatCard("${all.count { it.status == "want" }}", "Хочу посмотреть")
+            StatCard(f1(hours), "Часов просмотра")
+            StatCard(avg, "Средняя оценка")
         }
-        val list = if (sub == 0) want else watched
-        if (list.isEmpty()) {
-            Hint(if (sub == 0) "Пока пусто. Найдите фильм и нажмите «Хочу посмотреть»." else "Пока пусто. Отметьте просмотренное или импортируйте из Must в разделе «Ещё».")
-        } else {
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                items(list, key = { it.id }) { e ->
-                    ItemRow(e.toItem(), badge = e.rating?.let { "★ $it" }) { vm.open(e.toItem()) }
+
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            Text("Ваши оценки", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().height(120.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                counts.forEachIndexed { i, c ->
+                    Column(
+                        Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom,
+                    ) {
+                        Text("$c", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val barHeight = (70f * c / maxCount).coerceAtLeast(2f)
+                        Box(
+                            Modifier.fillMaxWidth().height(barHeight.dp)
+                                .clip(RoundedCornerShape(4.dp)).background(Accent),
+                        )
+                        Text("${i + 1}", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        if (vm.pair.isNotBlank() && vm.partnerName != null) {
+            val pw = vm.partner.values.filter { it.status == "watched" }
+            val pr = pw.mapNotNull { it.rating }
+            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(vm.partnerName ?: "Партнёр", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatCard("${pw.size}", "Просмотрено")
+                    StatCard(if (pr.isEmpty()) "–" else f1(pr.average()), "Средняя оценка")
                 }
             }
         }
@@ -313,45 +504,52 @@ fun TogetherTab(vm: AppVM) {
     val theirWant = theirs.values.filter { it.status == "want" && mine[it.id] == null }
     val bothWatched = mine.values.filter { it.status == "watched" && theirs[it.id]?.status == "watched" }
     var pick by remember { mutableStateOf<Entry?>(null) }
+    val full: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         if (vm.partnerName == null) {
-            item {
+            item(span = full) {
                 Text(
                     "Партнёр ещё не подключился. Код пары: ${vm.pair}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp),
                 )
             }
         }
-        item {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Хотите оба (${bothWant.size})", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        item(span = full) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Хотите оба (${bothWant.size})",
+                    style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+                )
                 if (bothWant.isNotEmpty()) {
                     Button(onClick = { pick = bothWant.random() }) { Text("Случайный") }
                 }
             }
         }
-        items(bothWant, key = { "bw" + it.id }) { e -> ItemRow(e.toItem()) { vm.open(e.toItem()) } }
-
-        item {
-            Text(
-                "$pname хочет, вы ещё нет (${theirWant.size})",
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
-            )
+        items(bothWant, key = { "bw" + it.id }) { e ->
+            PosterCard(e.title, e.poster, e.year, null, null, true) { vm.open(e.toItem()) }
         }
-        items(theirWant, key = { "tw" + it.id }) { e -> ItemRow(e.toItem()) { vm.open(e.toItem()) } }
 
-        item {
-            Text(
-                "Смотрели оба (${bothWatched.size})",
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
-            )
+        item(span = full) {
+            Text("$pname хочет, вы ещё нет (${theirWant.size})", style = MaterialTheme.typography.titleMedium)
+        }
+        items(theirWant, key = { "tw" + it.id }) { e ->
+            PosterCard(e.title, e.poster, e.year, null, null, true) { vm.open(e.toItem()) }
+        }
+
+        item(span = full) {
+            Text("Смотрели оба (${bothWatched.size})", style = MaterialTheme.typography.titleMedium)
         }
         items(bothWatched, key = { "ww" + it.id }) { e ->
             val a = e.rating?.toString() ?: "–"
             val b = theirs[e.id]?.rating?.toString() ?: "–"
-            ItemRow(e.toItem(), badge = "$a / $b") { vm.open(e.toItem()) }
+            PosterCard(e.title, e.poster, e.year, "$a / $b", null, true) { vm.open(e.toItem()) }
         }
     }
 
@@ -396,7 +594,7 @@ fun SettingsTab(vm: AppVM) {
                 OutlinedButton(onClick = { vm.joinPair(joinCode) }) { Text("Войти") }
             }
         } else {
-            Text("Код пары: ${vm.pair}", style = MaterialTheme.typography.titleMedium, color = Amber)
+            Text("Код пары: ${vm.pair}", style = MaterialTheme.typography.titleMedium, color = Accent)
             Text(
                 if (vm.partnerName != null) "Подключён: ${vm.partnerName}" else "Ждём партнёра: отправьте ему этот код",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -406,7 +604,7 @@ fun SettingsTab(vm: AppVM) {
                 TextButton(onClick = { vm.leavePair() }) { Text("Выйти из пары") }
             }
         }
-        vm.syncMsg?.let { Text(it, color = Coral) }
+        vm.syncMsg?.let { Text(it, color = Danger) }
 
         Spacer(Modifier.height(8.dp))
         Text("Импорт из Must / IMDb", style = MaterialTheme.typography.titleLarge)
@@ -423,7 +621,7 @@ fun SettingsTab(vm: AppVM) {
             onClick = { pendingStatus = "want"; launcher.launch(arrayOf("*/*")) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Импорт CSV: хочу посмотреть") }
-        vm.importMsg?.let { Text(it, color = Amber) }
+        vm.importMsg?.let { Text(it, color = Accent) }
 
         val warnings = listOfNotNull(
             if (!Tmdb.configured) "Не задан ключ TMDB — поиск не заработает." else null,
@@ -433,13 +631,52 @@ fun SettingsTab(vm: AppVM) {
         if (warnings.isNotEmpty() && vm.keysVersion >= 0) { // keysVersion — чтобы список обновился после загрузки ключей
             Spacer(Modifier.height(8.dp))
             Text("Настройка", style = MaterialTheme.typography.titleLarge)
-            warnings.forEach { Text(it, color = Coral) }
+            warnings.forEach { Text(it, color = Danger) }
             Text("Подробности — в README репозитория.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 // ============================================================ DETAIL
+
+@Composable
+fun RatingLine(source: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("★ ", color = Star, fontWeight = FontWeight.Bold)
+        Text(value, fontWeight = FontWeight.Bold)
+        Text("  $source", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun ReviewCard(r: Review) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable { expanded = !expanded }
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                r.author, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            r.rating?.let { PosterBadge(f1(it), true) }
+        }
+        r.date?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text(
+            r.text,
+            maxLines = if (expanded) Int.MAX_VALUE else 6,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 14.sp,
+        )
+        Text(if (expanded) "Свернуть" else "Читать полностью", fontSize = 12.sp, color = Accent)
+    }
+}
 
 @Composable
 fun DetailScreen(vm: AppVM, item: MediaItem) {
@@ -456,98 +693,101 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
         color = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
-            Text(shown.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item {
-                Row {
-                    Poster(shown.poster, shown.title, Modifier.width(130.dp).height(195.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(shown.title, style = MaterialTheme.typography.titleLarge)
-                        shown.original?.let {
-                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text(
-                            listOfNotNull(shown.year, kindLabel(shown.kind).ifBlank { null }).joinToString(" · "),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        d?.extra?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        d?.genres?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        Spacer(Modifier.height(4.dp))
-                        d?.imdb?.let {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
+                Text(shown.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+            }
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item {
+                    Row {
+                        Poster(shown.poster, shown.title, Modifier.width(130.dp).aspectRatio(2f / 3f))
+                        Spacer(Modifier.width(14.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(shown.title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            shown.original?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             Text(
-                                "IMDb ★ $it" + (d.imdbVotes?.let { v -> "  ($v)" } ?: ""),
-                                color = Amber, style = MaterialTheme.typography.titleSmall,
+                                listOfNotNull(shown.year, kindLabel(shown.kind).ifBlank { null }).joinToString(" · "),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        }
-                        d?.tmdbRating?.let {
-                            Text("TMDB ★ " + String.format("%.1f", it), color = Amber, style = MaterialTheme.typography.titleSmall)
-                        }
-                        d?.shikiRating?.let {
-                            Text("Shikimori ★ " + String.format("%.1f", it), color = Amber, style = MaterialTheme.typography.titleSmall)
+                            d?.extra?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            d?.genres?.let { Text(it, fontSize = 13.sp) }
+                            Spacer(Modifier.height(4.dp))
+                            d?.imdb?.let { RatingLine("IMDb", it + (d.imdbVotes?.let { v -> "  ($v)" } ?: "")) }
+                            d?.tmdbRating?.let { RatingLine("TMDB", f1(it)) }
+                            d?.shikiRating?.let { RatingLine("Shikimori", f1(it)) }
                         }
                     }
                 }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { vm.setStatus(shown, if (want) null else "want") },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (want) Coral else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (want) Color.Black else MaterialTheme.colorScheme.onSurface,
-                        ),
-                    ) { Text(if (want) "В списке «Хочу»" else "Хочу посмотреть") }
-                    Button(
-                        onClick = { showRate = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (watched) Coral else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (watched) Color.Black else MaterialTheme.colorScheme.onSurface,
-                        ),
-                    ) { Text(if (watched) "Посмотрел" + (entry?.rating?.let { " ★ $it" } ?: "") else "Посмотрел") }
-                }
-                if (entry != null) {
-                    TextButton(onClick = { vm.setStatus(shown, null) }) { Text("Убрать из моих списков") }
-                }
-            }
-            if (partnerEntry != null) {
                 item {
-                    val st = if (partnerEntry.status == "want") "хочет посмотреть"
-                    else "посмотрел" + (partnerEntry.rating?.let { ", оценка $it" } ?: "")
-                    Text("${vm.partnerName ?: "Партнёр"}: $st", color = Amber)
-                }
-            }
-            item {
-                when {
-                    vm.detailLoading && d == null -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { vm.setStatus(shown, if (want) null else "want", null, d?.runtimeMin) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (want) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = Color.White,
+                            ),
+                        ) { Text(if (want) "В списке «Хочу»" else "Хочу посмотреть") }
+                        Button(
+                            onClick = { showRate = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (watched) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = Color.White,
+                            ),
+                        ) { Text(if (watched) "Посмотрел" + (entry?.rating?.let { " ★ $it" } ?: "") else "Посмотрел") }
                     }
-                    vm.detailError != null && d == null -> Text(vm.detailError ?: "", color = Coral)
-                    else -> Text(shown.overview ?: "Описание отсутствует.", style = MaterialTheme.typography.bodyMedium)
+                    if (entry != null) {
+                        TextButton(onClick = { vm.setStatus(shown, null) }) { Text("Убрать из моих списков") }
+                    }
                 }
-            }
-            if (d != null && d.similar.isNotEmpty()) {
-                item { Text("Похожее", style = MaterialTheme.typography.titleMedium) }
+                if (partnerEntry != null) {
+                    item {
+                        val st = if (partnerEntry.status == "want") "хочет посмотреть"
+                        else "посмотрел" + (partnerEntry.rating?.let { ", оценка $it" } ?: "")
+                        Text("${vm.partnerName ?: "Партнёр"}: $st", color = Star)
+                    }
+                }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(d.similar, key = { it.id }) { s ->
-                            Column(Modifier.width(110.dp).clickable { vm.open(s) }) {
-                                Poster(s.poster, s.title, Modifier.width(110.dp).height(165.dp))
-                                Text(
-                                    s.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp),
-                                )
+                    when {
+                        vm.detailLoading && d == null -> Box(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { CircularProgressIndicator() }
+                        vm.detailError != null && d == null -> Text(vm.detailError ?: "", color = Danger)
+                        else -> Text(shown.overview ?: "Описание отсутствует.", fontSize = 15.sp)
+                    }
+                }
+                if (d != null && d.similar.isNotEmpty()) {
+                    item { Text("Похожее", style = MaterialTheme.typography.titleMedium) }
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(d.similar, key = { it.id }) { s ->
+                                Column(Modifier.width(110.dp).clickable { vm.open(s) }) {
+                                    Box {
+                                        Poster(s.poster, s.title, Modifier.width(110.dp).aspectRatio(2f / 3f))
+                                        s.rating?.let {
+                                            PosterBadge(f1(it), true, Modifier.align(Alignment.TopEnd).padding(5.dp))
+                                        }
+                                    }
+                                    Text(
+                                        s.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
+                                    )
+                                }
                             }
                         }
                     }
                 }
+                if (d != null && d.reviews.isNotEmpty()) {
+                    item { Text("Отзывы", style = MaterialTheme.typography.titleMedium) }
+                    items(d.reviews) { r -> ReviewCard(r) }
+                }
             }
         }
-    }
     }
 
     if (showRate) {
@@ -560,7 +800,7 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             row.forEach { n ->
                                 OutlinedButton(
-                                    onClick = { vm.setStatus(shown, "watched", n); showRate = false },
+                                    onClick = { vm.setStatus(shown, "watched", n, d?.runtimeMin); showRate = false },
                                     contentPadding = PaddingValues(0.dp),
                                     modifier = Modifier.size(40.dp),
                                 ) { Text("$n") }
@@ -570,7 +810,9 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { vm.setStatus(shown, "watched", null); showRate = false }) { Text("Без оценки") }
+                TextButton(onClick = { vm.setStatus(shown, "watched", null, d?.runtimeMin); showRate = false }) {
+                    Text("Без оценки")
+                }
             },
             dismissButton = { TextButton(onClick = { showRate = false }) { Text("Отмена") } },
         )

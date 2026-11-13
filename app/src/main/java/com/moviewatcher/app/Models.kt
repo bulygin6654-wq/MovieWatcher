@@ -25,6 +25,15 @@ data class Detail(
     val genres: String? = null,
     val extra: String? = null,
     val similar: List<MediaItem> = emptyList(),
+    val runtimeMin: Int? = null,
+    val reviews: List<Review> = emptyList(),
+)
+
+data class Review(
+    val author: String,
+    val rating: Double?,
+    val text: String,
+    val date: String?,
 )
 
 /** status: "want" | "watched" */
@@ -37,6 +46,7 @@ data class Entry(
     val status: String,
     val rating: Int?,
     val ts: Long,
+    val runtime: Int? = null, // минуты, нужны для «часов просмотра»
 ) {
     fun toItem() = MediaItem(id = id, title = title, year = year, poster = poster, kind = kind)
 
@@ -49,6 +59,7 @@ data class Entry(
         put("s", status)
         put("r", rating ?: 0)
         put("ts", ts)
+        put("rt", runtime ?: 0)
     }
 
     companion object {
@@ -61,6 +72,7 @@ data class Entry(
             status = o.optString("s", "want"),
             rating = o.optInt("r", 0).takeIf { it > 0 },
             ts = o.optLong("ts", 0L),
+            runtime = o.optInt("rt", 0).takeIf { it > 0 },
         )
 
         fun listToJson(m: Map<String, Entry>): String {

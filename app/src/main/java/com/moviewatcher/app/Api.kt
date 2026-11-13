@@ -101,6 +101,28 @@ object Tmdb {
         return list.map { parse(it, kind) }.take(20)
     }
 
+    private fun hasCyrillic(t: String) = t.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
+
+    /** Отзывы пользователей TMDB: сначала русские, потом английские. */
+    fun reviews(kind: String, id: Int): List<Review> {
+        val ru = runCatching { call("/$kind/$id/reviews", "language" to "ru-RU").optJSONArray("results").objs() }
+            .getOrDefault(emptyList())
+        val en = runCatching { call("/$kind/$id/reviews", "language" to "en-US").optJSONArray("results").objs() }
+            .getOrDefault(emptyList())
+        return (ru + en).distinctBy { it.str("id") ?: it.hashCode().toString() }
+            .map {
+                Review(
+                    author = it.str("author") ?: "Аноним",
+                    rating = it.optJSONObject("author_details")?.dbl("rating"),
+                    text = it.str("content")?.trim() ?: "",
+                    date = it.str("created_at")?.take(10),
+                )
+            }
+            .filter { it.text.isNotBlank() }
+            .sortedByDescending { hasCyrillic(it.text) }
+            .take(6)
+    }
+
     fun detail(kind: String, id: Int): Detail {
         val r = call(
             "/$kind/$id",
@@ -134,6 +156,16 @@ object Tmdb {
         var sim = r.optJSONObject("recommendations")?.optJSONArray("results").objs()
         if (sim.isEmpty()) sim = r.optJSONObject("similar")?.optJSONArray("results").objs()
 
+        val runtimeMin = if (kind == "movie") {
+            r.optInt("runtime", 0).takeIf { it > 0 }
+        } else {
+            val eps = r.optInt("number_of_episodes", 0)
+            val per = r.optJSONArray("episode_run_time")?.optInt(0, 0)?.takeIf { it > 0 }
+                ?: r.optJSONObject("last_episode_to_air")?.optInt("runtime", 0)?.takeIf { it > 0 }
+                ?: 0
+            (eps * per).takeIf { it > 0 }
+        }
+
         return Detail(
             item = base.copy(poster = poster ?: base.poster, overview = overview),
             imdb = imdb,
@@ -141,6 +173,8 @@ object Tmdb {
             genres = genres.ifBlank { null },
             extra = extra,
             similar = sim.map { parse(it, kind) }.take(20),
+            runtimeMin = runtimeMin,
+            reviews = runCatching { reviews(kind, id) }.getOrDefault(emptyList()),
         )
     }
 }
@@ -214,7 +248,9 @@ object Shiki {
             o.optInt("duration", 0).takeIf { it > 0 }?.let { "$it мин/серия" },
         ).joinToString(", ").ifBlank { null }
         val sim = runCatching { similar(id) }.getOrDefault(emptyList())
+        val dur = o.optInt("duration", 0)
         return Detail(
+            runtimeMin = (eps * dur).takeIf { it > 0 },
             item = base.copy(overview = desc),
             shikiRating = base.rating,
             genres = genres.ifBlank { null },

@@ -195,7 +195,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // ============ МОЙ СПИСОК ============
 
-    fun setStatus(item: MediaItem, status: String?, rating: Int? = null) {
+    fun setStatus(item: MediaItem, status: String?, rating: Int? = null, runtime: Int? = null) {
         val m = LinkedHashMap(entries)
         if (status == null) {
             m.remove(item.id)
@@ -203,6 +203,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             m[item.id] = Entry(
                 id = item.id, title = item.title, year = item.year, poster = item.poster,
                 kind = item.kind, status = status, rating = rating, ts = System.currentTimeMillis(),
+                runtime = runtime ?: entries[item.id]?.runtime,
             )
         }
         entries = m
