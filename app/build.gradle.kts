@@ -11,8 +11,13 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
-fun secret(name: String): String =
-    (System.getenv(name)?.takeIf { it.isNotBlank() } ?: localProps.getProperty(name) ?: "").trim()
+fun secret(name: String, default: String = ""): String =
+    (System.getenv(name)?.takeIf { it.isNotBlank() } ?: localProps.getProperty(name) ?: default).trim()
+
+// Публичные данные Firebase-проекта (веб-ключ Firebase не секретный: доступ к данным защищают правила Firestore).
+// Можно переопределить через переменные окружения или local.properties.
+val firebaseProjectDefault = "moviewacher-6d602"
+val firebaseKeyDefault = "AIzaSyDED3YkJ1gaOuT_HVmFCWGGh_mdI7luFrw"
 
 android {
     namespace = "com.moviewatcher.app"
@@ -27,8 +32,8 @@ android {
 
         buildConfigField("String", "TMDB_KEY", "\"${secret("TMDB_KEY")}\"")
         buildConfigField("String", "OMDB_KEY", "\"${secret("OMDB_KEY")}\"")
-        buildConfigField("String", "FIREBASE_PROJECT", "\"${secret("FIREBASE_PROJECT")}\"")
-        buildConfigField("String", "FIREBASE_KEY", "\"${secret("FIREBASE_KEY")}\"")
+        buildConfigField("String", "FIREBASE_PROJECT", "\"${secret("FIREBASE_PROJECT", firebaseProjectDefault)}\"")
+        buildConfigField("String", "FIREBASE_KEY", "\"${secret("FIREBASE_KEY", firebaseKeyDefault)}\"")
     }
 
     buildFeatures {

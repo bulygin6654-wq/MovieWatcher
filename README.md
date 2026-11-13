@@ -48,22 +48,15 @@ service cloud.firestore {
 
 Данные пары видит только тот, кто знает код (6 символов). Документ с ключами может прочитать любой, кто знает ID проекта, поэтому используйте только бесплатные ключи. Сменить ключ можно прямо в консоли Firebase, пересборка не нужна.
 
-### 3. Два секрета для сборки
+### 3. Данные проекта Firebase
 
-В репозитории: **Settings → Secrets and variables → Actions**:
-
-| Secret | Где взять |
-|---|---|
-| `FIREBASE_PROJECT` | Firebase Console → Project settings → Project ID |
-| `FIREBASE_KEY` | Firebase Console → Project settings → Web API Key |
-
-Эти два значения не секретные в строгом смысле (веб-ключ Firebase предназначен для публичного использования, данные защищают правила Firestore).
+`FIREBASE_PROJECT` (Project ID) и `FIREBASE_KEY` (Web API Key) уже прописаны по умолчанию в `app/build.gradle.kts`. Это публичные значения: веб-ключ Firebase предназначен для приложений, а данные защищают правила Firestore. Чтобы использовать другой проект, задайте одноимённые секреты GitHub Actions или значения в `local.properties`.
 
 ## Сборка
 
 APK собирает GitHub Actions при каждом пуше в `main`. Готовый файл — в разделе **Releases → latest → MovieWatcher.apk**. Установите его на оба телефона.
 
-Локально: положите `FIREBASE_PROJECT` и `FIREBASE_KEY` в `local.properties` и выполните `gradle assembleDebug`. При желании туда же можно добавить `TMDB_KEY` и `OMDB_KEY` как запасной вариант, если Firebase недоступен.
+Локально: выполните `gradle assembleDebug`. При желании в `local.properties` можно добавить `TMDB_KEY` и `OMDB_KEY` как запасной вариант, если Firebase недоступен.
 
 ## Перенос из Must
 
