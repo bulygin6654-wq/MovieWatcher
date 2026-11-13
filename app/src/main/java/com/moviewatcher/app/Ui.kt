@@ -704,36 +704,6 @@ fun RatingLine(source: String, value: String) {
 }
 
 @Composable
-fun ReviewCard(r: Review) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable { expanded = !expanded }
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                r.author, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            r.rating?.let { PosterBadge(f1(it), true) }
-        }
-        r.date?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Text(
-            r.text,
-            maxLines = if (expanded) Int.MAX_VALUE else 6,
-            overflow = TextOverflow.Ellipsis,
-            fontSize = 14.sp,
-        )
-        Text(if (expanded) "Свернуть" else "Читать полностью", fontSize = 12.sp, color = Accent)
-    }
-}
-
-@Composable
 fun DetailScreen(vm: AppVM, item: MediaItem) {
     val d = vm.detail?.takeIf { it.item.id == item.id }
     val shown = d?.item ?: item
@@ -826,18 +796,27 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = { vm.setStatus(shown, if (want) null else "want", null, d?.runtimeMin) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (want) Accent else MaterialTheme.colorScheme.surfaceVariant,
                                     contentColor = Color.White,
                                 ),
-                            ) { Text(if (want) "В списке «Хочу»" else "Хочу посмотреть") }
+                            ) { Text("Хочу посмотреть", maxLines = 1, fontSize = 14.sp) }
                             Button(
                                 onClick = { showRate = true },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (watched) Accent else MaterialTheme.colorScheme.surfaceVariant,
                                     contentColor = Color.White,
                                 ),
-                            ) { Text(if (watched) "Посмотрел" + (entry?.rating?.let { " ★ $it" } ?: "") else "Посмотрел") }
+                            ) {
+                                Text(
+                                    if (watched) "Посмотрел" + (entry?.rating?.let { " ★$it" } ?: "") else "Посмотрел",
+                                    maxLines = 1, fontSize = 14.sp,
+                                )
+                            }
                         }
                     }
                     if (entry != null) {
@@ -939,10 +918,6 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                             }
                         }
                     }
-                }
-                if (d != null && d.reviews.isNotEmpty()) {
-                    item { Text("Отзывы", style = MaterialTheme.typography.titleMedium) }
-                    items(d.reviews) { r -> ReviewCard(r) }
                 }
             }
         }

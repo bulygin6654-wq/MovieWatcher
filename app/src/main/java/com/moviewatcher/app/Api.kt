@@ -118,28 +118,6 @@ object Tmdb {
             Episode(num, it.str("name") ?: "Серия $num", it.str("air_date"))
         }
 
-    private fun hasCyrillic(t: String) = t.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
-
-    /** Отзывы пользователей TMDB: сначала русские, потом английские. */
-    fun reviews(kind: String, id: Int): List<Review> {
-        val ru = runCatching { call("/$kind/$id/reviews", "language" to "ru-RU").optJSONArray("results").objs() }
-            .getOrDefault(emptyList())
-        val en = runCatching { call("/$kind/$id/reviews", "language" to "en-US").optJSONArray("results").objs() }
-            .getOrDefault(emptyList())
-        return (ru + en).distinctBy { it.str("id") ?: it.hashCode().toString() }
-            .map {
-                Review(
-                    author = it.str("author") ?: "Аноним",
-                    rating = it.optJSONObject("author_details")?.dbl("rating"),
-                    text = it.str("content")?.trim() ?: "",
-                    date = it.str("created_at")?.take(10),
-                )
-            }
-            .filter { it.text.isNotBlank() }
-            .sortedByDescending { hasCyrillic(it.text) }
-            .take(6)
-    }
-
     fun detail(kind: String, id: Int): Detail {
         val r = call(
             "/$kind/$id",
@@ -200,7 +178,6 @@ object Tmdb {
             extra = extra,
             similar = sim.map { parse(it, kind) }.take(20),
             runtimeMin = runtimeMin,
-            reviews = runCatching { reviews(kind, id) }.getOrDefault(emptyList()),
         )
     }
 }

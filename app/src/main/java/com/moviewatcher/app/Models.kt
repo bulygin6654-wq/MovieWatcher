@@ -26,7 +26,6 @@ data class Detail(
     val extra: String? = null,
     val similar: List<MediaItem> = emptyList(),
     val runtimeMin: Int? = null,
-    val reviews: List<Review> = emptyList(),
     val seasons: List<SeasonInfo> = emptyList(),
     val ended: Boolean = false,
     val totalEps: Int? = null,
@@ -36,13 +35,6 @@ data class SeasonInfo(val number: Int, val count: Int)
 
 /** date — ISO yyyy-MM-dd или null */
 data class Episode(val num: Int, val title: String, val date: String?)
-
-data class Review(
-    val author: String,
-    val rating: Double?,
-    val text: String,
-    val date: String?,
-)
 
 /** status: "want" | "watching" | "watched" */
 data class Entry(
