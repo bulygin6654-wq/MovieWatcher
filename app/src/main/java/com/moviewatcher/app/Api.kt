@@ -112,6 +112,12 @@ object Tmdb {
         return (eps * per).takeIf { it > 0 }
     }
 
+    fun season(tvId: Int, n: Int): List<Episode> =
+        call("/tv/$tvId/season/$n", "language" to "ru-RU").optJSONArray("episodes").objs().map {
+            val num = it.optInt("episode_number")
+            Episode(num, it.str("name") ?: "Серия $num", it.str("air_date"))
+        }
+
     private fun hasCyrillic(t: String) = t.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
 
     /** Отзывы пользователей TMDB: сначала русские, потом английские. */
@@ -177,7 +183,16 @@ object Tmdb {
             (eps * per).takeIf { it > 0 }
         }
 
+        val seasons = if (kind == "tv") {
+            r.optJSONArray("seasons").objs()
+                .filter { it.optInt("season_number", 0) > 0 && it.optInt("episode_count", 0) > 0 }
+                .map { SeasonInfo(it.optInt("season_number"), it.optInt("episode_count")) }
+        } else emptyList()
+
         return Detail(
+            seasons = seasons,
+            ended = kind == "tv" && (r.str("status") == "Ended" || r.str("status") == "Canceled"),
+            totalEps = if (kind == "tv") r.optInt("number_of_episodes", 0).takeIf { it > 0 } else null,
             item = base.copy(poster = poster ?: base.poster, overview = overview),
             imdb = imdb,
             tmdbRating = base.rating,
@@ -265,7 +280,11 @@ object Shiki {
         ).joinToString(", ").ifBlank { null }
         val sim = runCatching { similar(id) }.getOrDefault(emptyList())
         val dur = o.optInt("duration", 0)
+        val total = if (eps > 0) eps else o.optInt("episodes_aired", 0)
         return Detail(
+            seasons = if (total > 0) listOf(SeasonInfo(1, total)) else emptyList(),
+            ended = o.str("status") == "released",
+            totalEps = total.takeIf { it > 0 },
             runtimeMin = (eps * dur).takeIf { it > 0 },
             item = base.copy(overview = desc),
             shikiRating = base.rating,

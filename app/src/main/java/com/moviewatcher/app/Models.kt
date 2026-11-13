@@ -27,7 +27,15 @@ data class Detail(
     val similar: List<MediaItem> = emptyList(),
     val runtimeMin: Int? = null,
     val reviews: List<Review> = emptyList(),
+    val seasons: List<SeasonInfo> = emptyList(),
+    val ended: Boolean = false,
+    val totalEps: Int? = null,
 )
+
+data class SeasonInfo(val number: Int, val count: Int)
+
+/** date — ISO yyyy-MM-dd или null */
+data class Episode(val num: Int, val title: String, val date: String?)
 
 data class Review(
     val author: String,
@@ -36,7 +44,7 @@ data class Review(
     val date: String?,
 )
 
-/** status: "want" | "watched" */
+/** status: "want" | "watching" | "watched" */
 data class Entry(
     val id: String,
     val title: String,
@@ -47,7 +55,11 @@ data class Entry(
     val rating: Int?,
     val ts: Long,
     val runtime: Int? = null, // минуты, нужны для «часов просмотра»
+    val eps: String? = null, // просмотренные серии: "1x1,1x2,2x1"
+    val total: Int? = null, // всего серий
 ) {
+    fun epSet(): Set<String> = eps?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+
     fun toItem() = MediaItem(id = id, title = title, year = year, poster = poster, kind = kind)
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -60,6 +72,8 @@ data class Entry(
         put("r", rating ?: 0)
         put("ts", ts)
         put("rt", runtime ?: 0)
+        put("e", eps ?: "")
+        put("tt", total ?: 0)
     }
 
     companion object {
@@ -73,6 +87,8 @@ data class Entry(
             rating = o.optInt("r", 0).takeIf { it > 0 },
             ts = o.optLong("ts", 0L),
             runtime = o.optInt("rt", 0).takeIf { it > 0 },
+            eps = o.optString("e").ifBlank { null },
+            total = o.optInt("tt", 0).takeIf { it > 0 },
         )
 
         fun listToJson(m: Map<String, Entry>): String {

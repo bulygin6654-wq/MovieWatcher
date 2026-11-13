@@ -1,11 +1,13 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.moviewatcher.app
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +32,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -255,7 +258,49 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 fun markOf(e: Entry?): String? = when (e?.status) {
     "watched" -> "✓"
     "want" -> "Хочу"
+    "watching" -> e.total?.let { "${e.epSet().size}/$it" } ?: "Смотрю"
     else -> null
+}
+
+val RU_MONTHS = listOf(
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+fun ruDate(iso: String?): String? = try {
+    val p = iso!!.split("-")
+    "${p[2].toInt()} ${RU_MONTHS[p[1].toInt() - 1]}, ${p[0]}"
+} catch (_: Exception) {
+    null
+}
+
+@Composable
+fun EpisodeRow(ep: Episode, watched: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+    val aired = ep.date == null || ep.date <= java.time.LocalDate.now().toString()
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    Column {
+        Row(
+            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLong).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${ep.num}", fontSize = 12.sp, color = dim, modifier = Modifier.width(24.dp))
+            Box(Modifier.width(26.dp), contentAlignment = Alignment.CenterStart) {
+                if (watched) {
+                    Text("✓", fontWeight = FontWeight.Bold)
+                } else if (aired) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(Accent))
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ep.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = if (aired) MaterialTheme.colorScheme.onBackground else dim,
+                )
+                ruDate(ep.date)?.let { Text(it, fontSize = 12.sp, color = dim) }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.surfaceVariant))
+    }
 }
 
 // ============================================================ SEARCH
@@ -361,7 +406,8 @@ fun MyTab(vm: AppVM) {
     val all = vm.entries.values
     val want = all.filter { it.status == "want" }.sortedByDescending { it.ts }
     val watched = all.filter { it.status == "watched" }.sortedByDescending { it.ts }
-    val series = all.filter { it.kind == "tv" || it.kind == "anime" }.sortedByDescending { it.ts }
+    val series = all.filter { it.kind == "tv" || it.kind == "anime" }
+        .sortedWith(compareByDescending<Entry> { it.status == "watching" }.thenByDescending { it.ts })
 
     Column(Modifier.fillMaxSize()) {
         Text(
@@ -430,7 +476,16 @@ fun InfoTab(vm: AppVM) {
     val all = vm.entries.values
     val watched = all.filter { it.status == "watched" }
     val rated = watched.mapNotNull { it.rating }
-    val hours = watched.sumOf { it.runtime ?: 0 } / 60.0
+    val minutes = all.sumOf { e ->
+        val rt = e.runtime ?: 0
+        val tot = e.total ?: 0
+        when (e.status) {
+            "watched" -> rt
+            "watching" -> if (tot > 0) rt * e.epSet().size / tot else 0
+            else -> 0
+        }
+    }
+    val hours = minutes / 60.0
     val avg = if (rated.isEmpty()) "–" else f1(rated.average())
     val counts = (1..10).map { n -> rated.count { it == n } }
     val maxCount = (counts.maxOrNull() ?: 0).coerceAtLeast(1)
@@ -687,6 +742,14 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
     var showRate by remember { mutableStateOf(false) }
     val want = entry?.status == "want"
     val watched = entry?.status == "watched"
+    val watching = entry?.status == "watching"
+    val isSeries = shown.kind != "movie"
+    val watchedEps = entry?.epSet() ?: emptySet()
+    var season by remember(item.id) { mutableIntStateOf(1) }
+    val curSeason = d?.seasons?.let { l -> l.firstOrNull { it.number == season } ?: l.firstOrNull() }
+    LaunchedEffect(item.id, d?.item?.id, curSeason?.number) {
+        if (d != null && curSeason != null && shown.kind == "tv") vm.loadSeason(shown, curSeason.number, curSeason.count)
+    }
 
     Surface(
         Modifier.fillMaxSize(),
@@ -724,21 +787,58 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                     }
                 }
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { vm.setStatus(shown, if (want) null else "want", null, d?.runtimeMin) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (want) Accent else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = Color.White,
-                            ),
-                        ) { Text(if (want) "В списке «Хочу»" else "Хочу посмотреть") }
-                        Button(
-                            onClick = { showRate = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (watched) Accent else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = Color.White,
-                            ),
-                        ) { Text(if (watched) "Посмотрел" + (entry?.rating?.let { " ★ $it" } ?: "") else "Посмотрел") }
+                    if (isSeries) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { vm.setSeriesStatus(shown, d, if (want) null else "want", null) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (want) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Хочу", maxLines = 1, fontSize = 14.sp) }
+                            Button(
+                                onClick = { vm.setSeriesStatus(shown, d, if (watching) null else "watching", null) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (watching) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text("Смотрю", maxLines = 1, fontSize = 14.sp) }
+                            Button(
+                                onClick = { showRate = true },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (watched) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = Color.White,
+                                ),
+                            ) {
+                                Text(
+                                    if (watched) "Посмотрел" + (entry?.rating?.let { " ★$it" } ?: "") else "Посмотрел",
+                                    maxLines = 1, fontSize = 14.sp,
+                                )
+                            }
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.setStatus(shown, if (want) null else "want", null, d?.runtimeMin) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (want) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text(if (want) "В списке «Хочу»" else "Хочу посмотреть") }
+                            Button(
+                                onClick = { showRate = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (watched) Accent else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = Color.White,
+                                ),
+                            ) { Text(if (watched) "Посмотрел" + (entry?.rating?.let { " ★ $it" } ?: "") else "Посмотрел") }
+                        }
                     }
                     if (entry != null) {
                         TextButton(onClick = { vm.setStatus(shown, null) }) { Text("Убрать из моих списков") }
@@ -746,9 +846,67 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                 }
                 if (partnerEntry != null) {
                     item {
-                        val st = if (partnerEntry.status == "want") "хочет посмотреть"
-                        else "посмотрел" + (partnerEntry.rating?.let { ", оценка $it" } ?: "")
+                        val st = when (partnerEntry.status) {
+                            "want" -> "хочет посмотреть"
+                            "watching" -> "смотрит" + (partnerEntry.total?.let { " (${partnerEntry.epSet().size} из $it)" } ?: "")
+                            else -> "посмотрел" + (partnerEntry.rating?.let { ", оценка $it" } ?: "")
+                        }
                         Text("${vm.partnerName ?: "Партнёр"}: $st", color = Star)
+                    }
+                }
+                if (isSeries && d != null && curSeason != null) {
+                    item {
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            d.seasons.forEach { sn ->
+                                Pill(
+                                    if (shown.kind == "anime") "Серии" else "Сезон ${sn.number}",
+                                    sn.number == curSeason.number,
+                                ) { season = sn.number }
+                            }
+                        }
+                    }
+                    val epList = if (shown.kind == "anime") {
+                        (1..curSeason.count).map { Episode(it, "Серия $it", null) }
+                    } else vm.seasonCache["${shown.id}#${curSeason.number}"]
+                    if (epList == null) {
+                        item { Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
+                    } else {
+                        items(epList.chunked(25)) { chunk ->
+                            Column {
+                                chunk.forEach { ep ->
+                                    val key = "${curSeason.number}x${ep.num}"
+                                    EpisodeRow(
+                                        ep, key in watchedEps,
+                                        onClick = { vm.markEpisodes(shown, d, listOf(key), key !in watchedEps) },
+                                        onLong = {
+                                            val upTo = d.seasons.filter { it.number < curSeason.number }
+                                                .flatMap { sn -> (1..sn.count).map { "${sn.number}x$it" } } +
+                                                (1..ep.num).map { "${curSeason.number}x$it" }
+                                            vm.markEpisodes(shown, d, upTo, true)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        item {
+                            val seasonKeys = (1..curSeason.count).map { "${curSeason.number}x$it" }
+                            val allDone = seasonKeys.all { it in watchedEps }
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Pill(
+                                    if (allDone) "Просмотрены все эпизоды" else "Отметить всё просмотренным",
+                                    true,
+                                ) { vm.markEpisodes(shown, d, seasonKeys, !allDone) }
+                                Text(
+                                    "Нажмите на серию, чтобы отметить. Долгое нажатие — отметить всё до этой серии.",
+                                    fontSize = 11.sp, textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
+                        }
                     }
                 }
                 item {
@@ -800,7 +958,11 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             row.forEach { n ->
                                 OutlinedButton(
-                                    onClick = { vm.setStatus(shown, "watched", n, d?.runtimeMin); showRate = false },
+                                    onClick = {
+                                        if (isSeries) vm.setSeriesStatus(shown, d, "watched", n)
+                                        else vm.setStatus(shown, "watched", n, d?.runtimeMin)
+                                        showRate = false
+                                    },
                                     contentPadding = PaddingValues(0.dp),
                                     modifier = Modifier.size(40.dp),
                                 ) { Text("$n") }
@@ -810,7 +972,11 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { vm.setStatus(shown, "watched", null, d?.runtimeMin); showRate = false }) {
+                TextButton(onClick = {
+                    if (isSeries) vm.setSeriesStatus(shown, d, "watched", null)
+                    else vm.setStatus(shown, "watched", null, d?.runtimeMin)
+                    showRate = false
+                }) {
                     Text("Без оценки")
                 }
             },

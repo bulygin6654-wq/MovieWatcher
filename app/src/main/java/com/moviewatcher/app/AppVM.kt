@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -67,6 +68,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         private set
     private val detailCache = HashMap<String, Detail>()
 
+    /** Серии сезонов: ключ "id#номер сезона". */
+    val seasonCache = mutableStateMapOf<String, List<Episode>>()
+
     // --- импорт ---
     var importMsg by mutableStateOf<String?>(null)
         private set
@@ -92,7 +96,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     /** Дотягивает длительность для просмотренного (для «часов просмотра»), в фоне. */
     fun fillRuntimes() {
         viewModelScope.launch {
-            val todo = entries.values.filter { it.status == "watched" && it.runtime == null }.take(400)
+            val todo = entries.values.filter { (it.status == "watched" || it.status == "watching") && it.runtime == null }.take(400)
             if (todo.isEmpty()) return@launch
             val sem = Semaphore(5)
             val found = withContext(Dispatchers.IO) {
@@ -238,6 +242,69 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 id = item.id, title = item.title, year = item.year, poster = item.poster,
                 kind = item.kind, status = status, rating = rating, ts = System.currentTimeMillis(),
                 runtime = runtime ?: entries[item.id]?.runtime,
+                eps = entries[item.id]?.eps, total = entries[item.id]?.total,
+            )
+        }
+        entries = m
+        store.saveEntries(m)
+        schedulePush()
+    }
+
+    // ============ СЕРИАЛЫ: СЕРИИ ============
+
+    fun allKeys(d: Detail): List<String> = d.seasons.flatMap { s -> (1..s.count).map { "${s.number}x$it" } }
+
+    fun loadSeason(item: MediaItem, season: Int, count: Int) {
+        val key = "${item.id}#$season"
+        if (seasonCache.containsKey(key)) return
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) {
+                runCatching { Tmdb.season(item.id.split(":")[2].toInt(), season) }.getOrNull()
+            }
+            seasonCache[key] = list?.takeIf { it.isNotEmpty() }
+                ?: (1..count).map { Episode(it, "Серия $it", null) }
+        }
+    }
+
+    /** Статус сериала/аниме: "want" | "watching" | "watched" | null (убрать). */
+    fun setSeriesStatus(item: MediaItem, d: Detail?, status: String?, rating: Int?) {
+        val m = LinkedHashMap(entries)
+        if (status == null) {
+            m.remove(item.id)
+        } else {
+            val old = entries[item.id]
+            val eps = if (status == "watched" && d != null && d.seasons.isNotEmpty()) {
+                allKeys(d).joinToString(",")
+            } else old?.eps
+            m[item.id] = Entry(
+                id = item.id, title = item.title, year = item.year, poster = item.poster,
+                kind = item.kind, status = status, rating = rating ?: old?.rating,
+                ts = System.currentTimeMillis(),
+                runtime = d?.runtimeMin ?: old?.runtime, eps = eps, total = d?.totalEps ?: old?.total,
+            )
+        }
+        entries = m
+        store.saveEntries(m)
+        schedulePush()
+    }
+
+    /** Отметить / снять серии. Статус пересчитывается: «Смотрю», а если сериал закончился и всё просмотрено — «Посмотрел». */
+    fun markEpisodes(item: MediaItem, d: Detail, keys: Collection<String>, add: Boolean) {
+        val old = entries[item.id]
+        val cur = old?.epSet() ?: emptySet()
+        val next = if (add) cur + keys else cur - keys.toSet()
+        val m = LinkedHashMap(entries)
+        if (next.isEmpty()) {
+            if (old == null) return
+            m[item.id] = old.copy(status = "want", eps = null, ts = System.currentTimeMillis())
+        } else {
+            val total = d.totalEps
+            val status = if (d.ended && total != null && next.size >= total) "watched" else "watching"
+            m[item.id] = Entry(
+                id = item.id, title = item.title, year = item.year, poster = item.poster,
+                kind = item.kind, status = status, rating = old?.rating,
+                ts = System.currentTimeMillis(),
+                runtime = d.runtimeMin ?: old?.runtime, eps = next.joinToString(","), total = total,
             )
         }
         entries = m
