@@ -429,7 +429,7 @@ fun SettingsTab(vm: AppVM) {
             if (!Omdb.configured) "Не задан ключ OMDb — рейтинг IMDb не будет показываться." else null,
             if (!Sync.configured) "Не настроен Firebase — пара не будет синхронизироваться." else null,
         )
-        if (warnings.isNotEmpty()) {
+        if (warnings.isNotEmpty() && vm.keysVersion >= 0) { // keysVersion — чтобы список обновился после загрузки ключей
             Spacer(Modifier.height(8.dp))
             Text("Настройка", style = MaterialTheme.typography.titleLarge)
             warnings.forEach { Text(it, color = Coral) }

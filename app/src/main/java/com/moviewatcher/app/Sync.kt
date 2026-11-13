@@ -22,6 +22,14 @@ class Store(ctx: Context) {
         get() = sp.getString("pair", "") ?: ""
         set(v) = sp.edit().putString("pair", v).apply()
 
+    var cachedTmdb: String
+        get() = sp.getString("k_tmdb", "") ?: ""
+        set(v) = sp.edit().putString("k_tmdb", v).apply()
+
+    var cachedOmdb: String
+        get() = sp.getString("k_omdb", "") ?: ""
+        set(v) = sp.edit().putString("k_omdb", v).apply()
+
     fun loadEntries(): Map<String, Entry> = Entry.listFromJson(sp.getString("entries", null))
 
     fun saveEntries(m: Map<String, Entry>) {
@@ -42,6 +50,10 @@ object Sync {
 
     private fun base(code: String) =
         "https://firestore.googleapis.com/v1/projects/$project/databases/(default)/documents/pairs/$code/members"
+
+    fun configDocUrl(): String =
+        "https://firestore.googleapis.com/v1/projects/$project/databases/(default)/documents/config/keys".toHttpUrl()
+            .newBuilder().addQueryParameter("key", key).build().toString()
 
     fun newCode(): String {
         val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -80,5 +92,27 @@ object Sync {
             return Partner(name, entries)
         }
         return null
+    }
+}
+
+/**
+ * Ключи TMDB и OMDb. Берутся из Firestore (документ config/keys, поля tmdb и omdb),
+ * кешируются на телефоне. Запасной вариант — ключи, зашитые при сборке.
+ */
+object Keys {
+    @Volatile var tmdb: String = BuildConfig.TMDB_KEY
+    @Volatile var omdb: String = BuildConfig.OMDB_KEY
+
+    fun init(store: Store) {
+        store.cachedTmdb.takeIf { it.isNotBlank() }?.let { tmdb = it }
+        store.cachedOmdb.takeIf { it.isNotBlank() }?.let { omdb = it }
+    }
+
+    fun fetch(store: Store) {
+        if (!Sync.configured) return
+        val url = Sync.configDocUrl()
+        val f = JSONObject(Net.get(url)).optJSONObject("fields") ?: return
+        f.optJSONObject("tmdb")?.str("stringValue")?.trim()?.let { tmdb = it; store.cachedTmdb = it }
+        f.optJSONObject("omdb")?.str("stringValue")?.trim()?.let { omdb = it; store.cachedOmdb = it }
     }
 }

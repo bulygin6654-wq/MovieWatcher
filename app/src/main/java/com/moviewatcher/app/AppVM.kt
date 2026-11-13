@@ -75,8 +75,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private var pushJob: Job? = null
     private var detailJob: Job? = null
 
+    /** Растёт после загрузки ключей — чтобы экран «Ещё» обновил предупреждения. */
+    var keysVersion by mutableStateOf(0)
+        private set
+
     init {
-        loadRecs()
+        Keys.init(store)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { Keys.fetch(store) } }
+            keysVersion++
+            loadRecs()
+        }
     }
 
     // ============ ПОИСК ============

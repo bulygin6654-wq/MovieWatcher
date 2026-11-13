@@ -41,7 +41,7 @@ object Tmdb {
     private const val BASE = "https://api.themoviedb.org/3"
     private const val IMG = "https://image.tmdb.org/t/p/w342"
     private const val IMG_BIG = "https://image.tmdb.org/t/p/w500"
-    private val key get() = BuildConfig.TMDB_KEY
+    private val key get() = Keys.tmdb
     val configured get() = key.isNotBlank()
 
     private fun call(path: String, vararg params: Pair<String, String>): JSONObject {
@@ -147,7 +147,7 @@ object Tmdb {
 
 /** Рейтинг IMDb через OMDb. */
 object Omdb {
-    private val key get() = BuildConfig.OMDB_KEY
+    private val key get() = Keys.omdb
     val configured get() = key.isNotBlank()
 
     /** (рейтинг, число голосов) */

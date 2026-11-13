@@ -16,16 +16,14 @@ Android-приложение для двоих — аналог Must: общие
 
 ## Настройка (один раз)
 
-Ключи в код не зашиты. В репозитории: **Settings → Secrets and variables → Actions → New repository secret**.
+Ключи TMDB и OMDb хранятся в Firebase, а не в приложении и не в репозитории. Приложение читает их при запуске и запоминает на телефоне.
 
-| Secret | Где взять |
-|---|---|
-| `TMDB_KEY` | themoviedb.org → Settings → API → «API Key (v3 auth)» (бесплатно) |
-| `OMDB_KEY` | omdbapi.com/apikey.aspx (бесплатно, 1000 запросов в сутки) |
-| `FIREBASE_PROJECT` | Firebase Console → Project settings → Project ID |
-| `FIREBASE_KEY` | Firebase Console → Project settings → Web API Key |
+### 1. Ключи API (бесплатно)
 
-### Firebase
+- **TMDB**: themoviedb.org → Settings → API → «API Key (v3 auth)».
+- **OMDb**: omdbapi.com/apikey.aspx (1000 запросов в сутки).
+
+### 2. Firebase
 
 1. Создайте проект на console.firebase.google.com.
 2. **Build → Firestore Database → Create database**.
@@ -38,19 +36,34 @@ service cloud.firestore {
     match /pairs/{code}/members/{uid} {
       allow read, write: if true;
     }
+    match /config/keys {
+      allow read: if true;
+      allow write: if false;
+    }
   }
 }
 ```
 
-Данные видит только тот, кто знает код пары (6 символов). Для двоих этого достаточно.
+4. Во вкладке **Data** создайте коллекцию `config`, в ней документ с ID `keys` и два строковых поля: `tmdb` (ваш ключ TMDB) и `omdb` (ваш ключ OMDb).
+
+Данные пары видит только тот, кто знает код (6 символов). Документ с ключами может прочитать любой, кто знает ID проекта, поэтому используйте только бесплатные ключи. Сменить ключ можно прямо в консоли Firebase, пересборка не нужна.
+
+### 3. Два секрета для сборки
+
+В репозитории: **Settings → Secrets and variables → Actions**:
+
+| Secret | Где взять |
+|---|---|
+| `FIREBASE_PROJECT` | Firebase Console → Project settings → Project ID |
+| `FIREBASE_KEY` | Firebase Console → Project settings → Web API Key |
+
+Эти два значения не секретные в строгом смысле (веб-ключ Firebase предназначен для публичного использования, данные защищают правила Firestore).
 
 ## Сборка
 
 APK собирает GitHub Actions при каждом пуше в `main`. Готовый файл — в разделе **Releases → latest → MovieWatcher.apk**. Установите его на оба телефона.
 
-Локально: положите ключи в `local.properties` (`TMDB_KEY=...` и т. д.) и выполните `gradle assembleDebug`.
-
-> Ключи попадают внутрь APK. Если репозиторий публичный, APK из релиза скачает кто угодно и сможет вытащить ключи. Лучше сделать репозиторий приватным.
+Локально: положите `FIREBASE_PROJECT` и `FIREBASE_KEY` в `local.properties` и выполните `gradle assembleDebug`. При желании туда же можно добавить `TMDB_KEY` и `OMDB_KEY` как запасной вариант, если Firebase недоступен.
 
 ## Перенос из Must
 
