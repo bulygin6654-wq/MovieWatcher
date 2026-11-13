@@ -939,6 +939,18 @@ fun SettingsTab(vm: AppVM) {
                 "затем выберите файл. Фильмы подберутся по названию и году.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        var mustName by remember { mutableStateOf("") }
+        Text("Импорт из Must по нику (профиль должен быть открытым)", style = MaterialTheme.typography.titleSmall)
+        OutlinedTextField(
+            value = mustName, onValueChange = { mustName = it },
+            label = { Text("Ник в Must") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { vm.importMust(mustName) },
+            enabled = mustName.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Перенести всё из Must") }
+        Text("Или из CSV-файла:", style = MaterialTheme.typography.bodySmall)
         Button(
             onClick = { pendingStatus = "watched"; launcher.launch(arrayOf("*/*")) },
             modifier = Modifier.fillMaxWidth(),

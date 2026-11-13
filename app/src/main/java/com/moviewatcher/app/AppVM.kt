@@ -693,4 +693,76 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             fillMeta()
         }
     }
+
+    // ============ ИМПОРТ ИЗ MUST ПО НИКУ ============
+
+    fun importMust(username: String) {
+        if (username.isBlank()) return
+        viewModelScope.launch {
+            val items = try {
+                withContext(Dispatchers.IO) { MustImport.fetch(username) { importMsg = it } }
+            } catch (e: Exception) {
+                importMsg = e.message ?: "Не удалось загрузить профиль Must"
+                return@launch
+            }
+            if (items.isEmpty()) {
+                importMsg = "В профиле нет фильмов"
+                return@launch
+            }
+            val done = AtomicInteger(0)
+            val sem = Semaphore(5)
+            importMsg = "Подбираю фильмы: 0 / ${items.size}"
+            val matched = withContext(Dispatchers.IO) {
+                coroutineScope {
+                    items.map { it0 ->
+                        async {
+                            sem.withPermit {
+                                val m = runCatching { MustImport.match(it0) }.getOrNull()
+                                val d = if (m != null && it0.isShow) {
+                                    runCatching { Tmdb.detail("tv", m.id.split(":")[2].toInt()) }.getOrNull()
+                                } else null
+                                importMsg = "Подбираю фильмы: ${done.incrementAndGet()} / ${items.size}"
+                                Triple(it0, m, d)
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+            val map = LinkedHashMap(entries)
+            var added = 0
+            val now = System.currentTimeMillis()
+            for ((it0, m, d) in matched) {
+                if (m == null) continue
+                val old = map[m.id]
+                if (old != null && old.status == "watched" && it0.status == "want") continue
+                var status = it0.status
+                var eps: String? = null
+                if (it0.isShow && d != null && d.seasons.isNotEmpty()) {
+                    val keys = allKeys(d)
+                    val n = (it0.epsWatched ?: 0).coerceAtMost(keys.size)
+                    if (status == "watched") eps = keys.joinToString(",")
+                    else if (n > 0) {
+                        eps = keys.take(n).joinToString(",")
+                        status = if (d.ended && d.totalEps != null && n >= d.totalEps!!) "watched" else "watching"
+                    }
+                }
+                map[m.id] = Entry(
+                    id = m.id, title = m.title, year = m.year, poster = m.poster,
+                    kind = m.kind, status = status,
+                    rating = if (status == "want") null else it0.rating,
+                    ts = it0.ts ?: now,
+                    runtime = d?.runtimeMin ?: old?.runtime, eps = eps ?: old?.eps,
+                    total = d?.totalEps ?: old?.total,
+                )
+                added++
+            }
+            entries = map
+            store.saveEntries(map)
+            schedulePush()
+            val missed = items.size - matched.count { it.second != null }
+            importMsg = "Готово: добавлено $added из ${items.size}" +
+                if (missed > 0) ". Не найдено: $missed" else ""
+            fillMeta()
+        }
+    }
 }
