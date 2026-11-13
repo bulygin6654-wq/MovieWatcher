@@ -29,7 +29,49 @@ data class Detail(
     val seasons: List<SeasonInfo> = emptyList(),
     val ended: Boolean = false,
     val totalEps: Int? = null,
+    val trailerUrl: String? = null,
 )
+
+data class Trailer(val item: MediaItem, val url: String)
+
+data class Genre(val id: String, val name: String)
+
+data class Person(val id: Int, val name: String, val photo: String?)
+
+data class CreditInfo(val actors: List<Person>, val dirs: List<Person>)
+
+fun creditsToJson(m: Map<String, CreditInfo>): String {
+    fun arr(l: List<Person>) = JSONArray().also { a ->
+        l.forEach { a.put(JSONArray().put(it.id).put(it.name).put(it.photo ?: "")) }
+    }
+    val o = JSONObject()
+    m.forEach { (k, v) -> o.put(k, JSONObject().put("a", arr(v.actors)).put("d", arr(v.dirs))) }
+    return o.toString()
+}
+
+fun creditsFromJson(s: String?): Map<String, CreditInfo> {
+    if (s.isNullOrBlank()) return emptyMap()
+    return try {
+        val o = JSONObject(s)
+        fun list(a: JSONArray?): List<Person> {
+            if (a == null) return emptyList()
+            val out = ArrayList<Person>()
+            for (i in 0 until a.length()) {
+                val p = a.optJSONArray(i) ?: continue
+                out.add(Person(p.getInt(0), p.optString(1), p.optString(2).ifBlank { null }))
+            }
+            return out
+        }
+        val res = LinkedHashMap<String, CreditInfo>()
+        for (k in o.keys()) {
+            val c = o.getJSONObject(k)
+            res[k] = CreditInfo(list(c.optJSONArray("a")), list(c.optJSONArray("d")))
+        }
+        res
+    } catch (_: Exception) {
+        emptyMap()
+    }
+}
 
 data class SeasonInfo(val number: Int, val count: Int)
 

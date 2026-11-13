@@ -112,6 +112,35 @@ object Tmdb {
         return (eps * per).takeIf { it > 0 }
     }
 
+    fun list(path: String, kind: String, vararg params: Pair<String, String>): List<MediaItem> =
+        call(path, "language" to "ru-RU", *params).optJSONArray("results").objs().map { parse(it, kind) }
+
+    fun genres(kind: String): List<Genre> =
+        call("/genre/$kind/list", "language" to "ru").optJSONArray("genres").objs().map {
+            Genre(it.optInt("id").toString(), it.optString("name").replaceFirstChar { c -> c.uppercase() })
+        }
+
+    fun trailer(kind: String, id: Int): String? {
+        for (lang in listOf("ru-RU", "en-US")) {
+            val v = runCatching { call("/$kind/$id/videos", "language" to lang).optJSONArray("results").objs() }
+                .getOrDefault(emptyList())
+            v.firstOrNull { it.str("site") == "YouTube" && it.str("type") == "Trailer" }?.str("key")
+                ?.let { return "https://www.youtube.com/watch?v=$it" }
+        }
+        return null
+    }
+
+    fun credits(kind: String, id: Int): CreditInfo {
+        val r = call("/$kind/$id/credits", "language" to "ru-RU")
+        fun person(o: JSONObject) = Person(
+            o.getInt("id"), o.str("name") ?: "",
+            o.str("profile_path")?.let { "https://image.tmdb.org/t/p/w185$it" },
+        )
+        val actors = r.optJSONArray("cast").objs().take(8).map { person(it) }
+        val dirs = r.optJSONArray("crew").objs().filter { it.str("job") == "Director" }.take(2).map { person(it) }
+        return CreditInfo(actors, dirs)
+    }
+
     fun season(tvId: Int, n: Int): List<Episode> =
         call("/tv/$tvId/season/$n", "language" to "ru-RU").optJSONArray("episodes").objs().map {
             val num = it.optInt("episode_number")
@@ -122,8 +151,9 @@ object Tmdb {
         val r = call(
             "/$kind/$id",
             "language" to "ru-RU",
-            "append_to_response" to "external_ids,images,recommendations,similar",
+            "append_to_response" to "external_ids,images,recommendations,similar,videos",
             "include_image_language" to "ru,en,null",
+            "include_video_language" to "ru,en",
         )
         val base = parse(r, kind)
 
@@ -167,7 +197,12 @@ object Tmdb {
                 .map { SeasonInfo(it.optInt("season_number"), it.optInt("episode_count")) }
         } else emptyList()
 
+        val vids = r.optJSONObject("videos")?.optJSONArray("results").objs()
+            .filter { it.str("site") == "YouTube" && it.str("type") == "Trailer" }
+        val trailerKey = (vids.firstOrNull { it.str("iso_639_1") == "ru" } ?: vids.firstOrNull())?.str("key")
+
         return Detail(
+            trailerUrl = trailerKey?.let { "https://www.youtube.com/watch?v=$it" },
             seasons = seasons,
             ended = kind == "tv" && (r.str("status") == "Ended" || r.str("status") == "Canceled"),
             totalEps = if (kind == "tv") r.optInt("number_of_episodes", 0).takeIf { it > 0 } else null,
@@ -226,6 +261,22 @@ object Shiki {
         return arr.objs().map { parse(it) }
     }
 
+    fun list(params: Map<String, String>, limit: Int = 20): List<MediaItem> {
+        val b = "$BASE/api/animes".toHttpUrl().newBuilder().addQueryParameter("limit", limit.toString())
+        params.forEach { (k, v) -> b.addQueryParameter(k, v) }
+        return org.json.JSONArray(Net.get(b.build().toString(), headers)).objs().map { parse(it) }
+    }
+
+    fun genres(): List<Genre> {
+        val skip = setOf("Hentai", "Yaoi", "Yuri", "Erotica")
+        return org.json.JSONArray(Net.get("$BASE/api/genres", headers)).objs()
+            .filter { it.str("kind") == "anime" && it.str("name") !in skip }
+            .mapNotNull { o ->
+                val n = o.str("russian") ?: o.str("name") ?: return@mapNotNull null
+                Genre(o.getInt("id").toString(), n)
+            }
+    }
+
     fun runtime(id: Int): Int? {
         val o = JSONObject(Net.get("$BASE/api/animes/$id", headers))
         return (o.optInt("episodes", 0) * o.optInt("duration", 0)).takeIf { it > 0 }
@@ -258,7 +309,13 @@ object Shiki {
         val sim = runCatching { similar(id) }.getOrDefault(emptyList())
         val dur = o.optInt("duration", 0)
         val total = if (eps > 0) eps else o.optInt("episodes_aired", 0)
+        val trailer = runCatching {
+            val v = org.json.JSONArray(Net.get("$BASE/api/animes/$id/videos", headers)).objs()
+                .filter { it.str("hosting") == "youtube" }
+            (v.firstOrNull { it.str("kind") == "pv" } ?: v.firstOrNull())?.str("url")
+        }.getOrNull()
         return Detail(
+            trailerUrl = trailer,
             seasons = if (total > 0) listOf(SeasonInfo(1, total)) else emptyList(),
             ended = o.str("status") == "released",
             totalEps = total.takeIf { it > 0 },
@@ -269,5 +326,61 @@ object Shiki {
             extra = extra,
             similar = sim,
         )
+    }
+}
+
+/** Помощник: описание → список подходящих фильмов (Gemini) → поиск в TMDB / Shikimori. */
+object Gemini {
+    val configured get() = Keys.gemini.isNotBlank()
+
+    data class Cand(val title: String, val titleRu: String?, val year: Int?, val type: String)
+
+    fun suggest(description: String): List<Cand> {
+        if (!configured) throw IOException("Не задан ключ Gemini")
+        val prompt = "Пользователь описывает фильм, сериал или аниме, которое хочет найти или вспомнить. " +
+            "Предложи от 5 до 8 наиболее вероятных вариантов, самые подходящие первыми. " +
+            "Ответь ТОЛЬКО JSON-массивом объектов вида " +
+            "{\"title\":\"оригинальное название\",\"title_ru\":\"название по-русски\",\"year\":2010,\"type\":\"movie\"}. " +
+            "Поле type: movie, tv или anime. Описание пользователя: " + description
+        val model = Keys.geminiModel.ifBlank { "gemini-flash-latest" }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${Keys.gemini}"
+        val body = JSONObject()
+            .put(
+                "contents",
+                org.json.JSONArray().put(
+                    JSONObject().put("parts", org.json.JSONArray().put(JSONObject().put("text", prompt))),
+                ),
+            )
+            .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 0.3))
+        val resp = JSONObject(Net.send("POST", url, body.toString()))
+        val parts = resp.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
+        val text = StringBuilder()
+        for (i in 0 until parts.length()) {
+            val p = parts.getJSONObject(i)
+            if (!p.optBoolean("thought", false)) text.append(p.optString("text"))
+        }
+        val clean = text.toString().trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val arr = org.json.JSONArray(clean)
+        return arr.objs().mapNotNull { o ->
+            val t = o.str("title") ?: o.str("title_ru") ?: return@mapNotNull null
+            Cand(t, o.str("title_ru"), o.optInt("year", 0).takeIf { it > 0 }, o.str("type") ?: "movie")
+        }.take(8)
+    }
+
+    fun resolve(c: Cand): MediaItem? {
+        if (c.type == "anime") {
+            (Shiki.search(c.titleRu ?: c.title).firstOrNull() ?: Shiki.search(c.title).firstOrNull())?.let { return it }
+        }
+        fun pick(list: List<MediaItem>): MediaItem? {
+            val byKind = list.filter { c.type == "anime" || it.kind == c.type }.ifEmpty { list }
+            val y = c.year
+            val byYear = if (y != null) {
+                byKind.firstOrNull { it.year?.toIntOrNull()?.let { v -> kotlin.math.abs(v - y) <= 1 } == true }
+            } else null
+            return byYear ?: byKind.firstOrNull()
+        }
+        pick(Tmdb.search(c.title))?.let { return it }
+        c.titleRu?.let { ru -> pick(Tmdb.search(ru))?.let { return it } }
+        return null
     }
 }

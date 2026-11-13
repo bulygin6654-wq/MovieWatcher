@@ -30,6 +30,20 @@ class Store(ctx: Context) {
         get() = sp.getString("k_omdb", "") ?: ""
         set(v) = sp.edit().putString("k_omdb", v).apply()
 
+    var cachedGemini: String
+        get() = sp.getString("k_gemini", "") ?: ""
+        set(v) = sp.edit().putString("k_gemini", v).apply()
+
+    var cachedGeminiModel: String
+        get() = sp.getString("k_gmodel", "") ?: ""
+        set(v) = sp.edit().putString("k_gmodel", v).apply()
+
+    fun loadCredits(): Map<String, CreditInfo> = creditsFromJson(sp.getString("credits", null))
+
+    fun saveCredits(m: Map<String, CreditInfo>) {
+        sp.edit().putString("credits", creditsToJson(m)).apply()
+    }
+
     fun loadEntries(): Map<String, Entry> = Entry.listFromJson(sp.getString("entries", null))
 
     fun saveEntries(m: Map<String, Entry>) {
@@ -102,10 +116,14 @@ object Sync {
 object Keys {
     @Volatile var tmdb: String = BuildConfig.TMDB_KEY
     @Volatile var omdb: String = BuildConfig.OMDB_KEY
+    @Volatile var gemini: String = ""
+    @Volatile var geminiModel: String = ""
 
     fun init(store: Store) {
         store.cachedTmdb.takeIf { it.isNotBlank() }?.let { tmdb = it }
         store.cachedOmdb.takeIf { it.isNotBlank() }?.let { omdb = it }
+        store.cachedGemini.takeIf { it.isNotBlank() }?.let { gemini = it }
+        store.cachedGeminiModel.takeIf { it.isNotBlank() }?.let { geminiModel = it }
     }
 
     fun fetch(store: Store) {
@@ -114,5 +132,7 @@ object Keys {
         val f = JSONObject(Net.get(url)).optJSONObject("fields") ?: return
         f.optJSONObject("tmdb")?.str("stringValue")?.trim()?.let { tmdb = it; store.cachedTmdb = it }
         f.optJSONObject("omdb")?.str("stringValue")?.trim()?.let { omdb = it; store.cachedOmdb = it }
+        f.optJSONObject("gemini")?.str("stringValue")?.trim()?.let { gemini = it; store.cachedGemini = it }
+        f.optJSONObject("gemini_model")?.str("stringValue")?.trim()?.let { geminiModel = it; store.cachedGeminiModel = it }
     }
 }

@@ -71,6 +71,41 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     /** Серии сезонов: ключ "id#номер сезона". */
     val seasonCache = mutableStateMapOf<String, List<Episode>>()
 
+    // --- главная (обзор) ---
+    var exploreKind by mutableStateOf("movie")
+        private set
+    val rails = mutableStateMapOf<String, List<MediaItem>>()
+    val trailers = mutableStateMapOf<String, List<Trailer>>()
+    val genres = mutableStateMapOf<String, List<Genre>>()
+    var exploreLoading by mutableStateOf(false)
+        private set
+    private val exploreLoaded = HashSet<String>()
+
+    // --- экран списка (жанр) ---
+    var listTitle by mutableStateOf<String?>(null)
+        private set
+    var listItems by mutableStateOf<List<MediaItem>>(emptyList())
+        private set
+    var listLoading by mutableStateOf(false)
+        private set
+
+    // --- помощник (поиск по описанию) ---
+    var aiMode by mutableStateOf(false)
+        private set
+    var aiQuery by mutableStateOf("")
+        private set
+    var aiResults by mutableStateOf<List<MediaItem>>(emptyList())
+        private set
+    var aiLoading by mutableStateOf(false)
+        private set
+    var aiError by mutableStateOf<String?>(null)
+        private set
+
+    // --- актёры и режиссёры просмотренного ---
+    var credits by mutableStateOf(store.loadCredits())
+        private set
+    private var metaJob: Job? = null
+
     // --- импорт ---
     var importMsg by mutableStateOf<String?>(null)
         private set
@@ -89,7 +124,183 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) { runCatching { Keys.fetch(store) } }
             keysVersion++
             loadRecs()
+            fillMeta()
+        }
+    }
+
+    // ============ ОБЗОР ============
+
+    fun setExploreKind(k: String) {
+        exploreKind = k
+        loadExplore(k)
+    }
+
+    fun loadExplore(k: String) {
+        if (!exploreLoaded.add(k)) return
+        viewModelScope.launch {
+            exploreLoading = true
+            withContext(Dispatchers.IO) {
+                coroutineScope {
+                    val jobs = ArrayList<kotlinx.coroutines.Deferred<Unit>>()
+                    fun rail(key: String, block: () -> List<MediaItem>) {
+                        jobs.add(async { rails["$k/$key"] = runCatching(block).getOrDefault(emptyList()) })
+                    }
+                    when (k) {
+                        "movie" -> {
+                            rail("trending") { Tmdb.list("/trending/movie/week", "movie") }
+                            rail("now") {
+                                Tmdb.list("/movie/now_playing", "movie", "region" to "KZ")
+                                    .ifEmpty { Tmdb.list("/movie/now_playing", "movie") }
+                            }
+                            rail("soon") {
+                                Tmdb.list("/movie/upcoming", "movie", "region" to "KZ")
+                                    .ifEmpty { Tmdb.list("/movie/upcoming", "movie") }
+                            }
+                            rail("popular") { Tmdb.list("/movie/popular", "movie") }
+                            rail("top") { Tmdb.list("/movie/top_rated", "movie") }
+                        }
+                        "tv" -> {
+                            rail("trending") { Tmdb.list("/trending/tv/week", "tv") }
+                            rail("popular") { Tmdb.list("/tv/popular", "tv") }
+                            rail("air") { Tmdb.list("/tv/on_the_air", "tv") }
+                            rail("top") { Tmdb.list("/tv/top_rated", "tv") }
+                        }
+                        else -> {
+                            rail("popular") { Shiki.list(mapOf("order" to "popularity")) }
+                            rail("ongoing") { Shiki.list(mapOf("status" to "ongoing", "order" to "popularity")) }
+                            rail("anons") { Shiki.list(mapOf("status" to "anons", "order" to "popularity")) }
+                            rail("ranked") { Shiki.list(mapOf("order" to "ranked")) }
+                        }
+                    }
+                    jobs.add(
+                        async {
+                            genres[k] = runCatching { if (k == "anime") Shiki.genres() else Tmdb.genres(k) }
+                                .getOrDefault(emptyList())
+                        },
+                    )
+                    jobs.awaitAll()
+                    exploreLoading = false
+
+                    if (k != "anime") {
+                        val src = (
+                            rails["$k/now"].orEmpty() + rails["$k/soon"].orEmpty() + rails["$k/trending"].orEmpty()
+                            ).distinctBy { it.id }.take(14)
+                        val tr = src.map { item ->
+                            async {
+                                runCatching { Tmdb.trailer(item.kind, item.id.split(":")[2].toInt()) }.getOrNull()
+                                    ?.let { Trailer(item, it) }
+                            }
+                        }.awaitAll().filterNotNull().take(8)
+                        trailers[k] = tr
+                    }
+                }
+            }
+            exploreLoading = false
+        }
+    }
+
+    fun openGenre(kind: String, g: Genre) {
+        listTitle = g.name
+        listItems = emptyList()
+        listLoading = true
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    when (kind) {
+                        "anime" -> Shiki.list(mapOf("genre" to g.id, "order" to "popularity"), 50)
+                        "tv" -> Tmdb.list(
+                            "/discover/tv", "tv", "with_genres" to g.id,
+                            "sort_by" to "popularity.desc", "vote_count.gte" to "50",
+                        )
+                        else -> Tmdb.list(
+                            "/discover/movie", "movie", "with_genres" to g.id,
+                            "sort_by" to "popularity.desc", "vote_count.gte" to "100",
+                        )
+                    }
+                }
+            }
+            listItems = r.getOrDefault(emptyList())
+            listLoading = false
+        }
+    }
+
+    fun closeList() {
+        listTitle = null
+    }
+
+    // ============ ПОМОЩНИК ============
+
+    fun toggleAi() {
+        aiMode = !aiMode
+    }
+
+    fun onAiQuery(q: String) {
+        aiQuery = q
+    }
+
+    fun aiSearch() {
+        val q = aiQuery.trim()
+        if (q.isBlank()) return
+        viewModelScope.launch {
+            aiLoading = true
+            aiError = null
+            aiResults = emptyList()
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val cands = Gemini.suggest(q)
+                    coroutineScope {
+                        cands.map { c -> async { runCatching { Gemini.resolve(c) }.getOrNull() } }.awaitAll()
+                    }.filterNotNull().distinctBy { it.id }
+                }
+            }
+            r.onSuccess {
+                aiResults = it
+                if (it.isEmpty()) aiError = "Ничего не нашлось. Попробуйте описать иначе."
+            }.onFailure {
+                aiError = if (!Gemini.configured) {
+                    "Не задан ключ Gemini (поле gemini в config/keys)."
+                } else {
+                    "Ошибка помощника: ${it.message}"
+                }
+            }
+            aiLoading = false
+        }
+    }
+
+    // ============ ДОТЯГИВАНИЕ ДАННЫХ ============
+
+    /** Через пару секунд после последнего изменения дотягивает длительность и состав фильмов. */
+    fun fillMeta() {
+        metaJob?.cancel()
+        metaJob = viewModelScope.launch {
+            delay(2500)
             fillRuntimes()
+            fillCredits()
+        }
+    }
+
+    fun fillCredits() {
+        viewModelScope.launch {
+            val todo = entries.values
+                .filter { (it.status == "watched" || it.status == "watching") && it.id.startsWith("tmdb:") }
+                .filter { !credits.containsKey(it.id) }.take(200)
+            if (todo.isEmpty()) return@launch
+            val sem = Semaphore(5)
+            val found = withContext(Dispatchers.IO) {
+                coroutineScope {
+                    todo.map { e ->
+                        async {
+                            sem.withPermit {
+                                val p = e.id.split(":")
+                                e.id to runCatching { Tmdb.credits(p[1], p[2].toInt()) }.getOrNull()
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }.mapNotNull { (id, c) -> if (c != null) id to c else null }.toMap()
+            if (found.isEmpty()) return@launch
+            credits = credits + found
+            store.saveCredits(credits)
         }
     }
 
@@ -248,6 +459,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         entries = m
         store.saveEntries(m)
         schedulePush()
+        fillMeta()
     }
 
     // ============ СЕРИАЛЫ: СЕРИИ ============
@@ -286,6 +498,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         entries = m
         store.saveEntries(m)
         schedulePush()
+        fillMeta()
     }
 
     /** Отметить / снять серии. Статус пересчитывается: «Смотрю», а если сериал закончился и всё просмотрено — «Посмотрел». */
@@ -310,6 +523,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         entries = m
         store.saveEntries(m)
         schedulePush()
+        fillMeta()
     }
 
     // ============ ПАРА ============
@@ -476,7 +690,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val missed = rows.size - matched.count { it.second != null }
             importMsg = "Готово: добавлено $added из ${rows.size}" +
                 if (missed > 0) ". Не найдено: $missed" else ""
-            fillRuntimes()
+            fillMeta()
         }
     }
 }

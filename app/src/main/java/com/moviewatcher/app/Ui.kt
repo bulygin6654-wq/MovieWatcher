@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -75,6 +76,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -118,6 +120,7 @@ fun f1(d: Double): String = String.format("%.1f", d)
 @Composable
 fun App(vm: AppVM) {
     var tab by remember { mutableIntStateOf(0) }
+    var showSearch by remember { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     // Пока приложение на экране — раз в 15 секунд подтягиваем список партнёра
@@ -130,14 +133,28 @@ fun App(vm: AppVM) {
         }
     }
 
-    BackHandler(enabled = vm.stack.isNotEmpty()) { vm.back() }
+    BackHandler(enabled = vm.stack.isNotEmpty() || vm.listTitle != null || showSearch) {
+        when {
+            vm.stack.isNotEmpty() -> vm.back()
+            vm.listTitle != null -> vm.closeList()
+            else -> showSearch = false
+        }
+    }
 
     if (vm.stack.isNotEmpty()) {
         DetailScreen(vm, vm.stack.last())
         return
     }
+    if (vm.listTitle != null) {
+        ListScreen(vm)
+        return
+    }
+    if (showSearch) {
+        SearchScreen(vm) { showSearch = false }
+        return
+    }
 
-    val icons = listOf(Icons.Default.Person, Icons.Default.Search, Icons.Default.Favorite, Icons.Default.Settings)
+    val icons = listOf(Icons.Default.Person, Icons.Default.Home, Icons.Default.Favorite, Icons.Default.Settings)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -156,8 +173,8 @@ fun App(vm: AppVM) {
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> MyTab(vm)
-                1 -> SearchTab(vm)
+                0 -> MyTab(vm) { showSearch = true }
+                1 -> ExploreTab(vm) { showSearch = true }
                 2 -> TogetherTab(vm)
                 else -> SettingsTab(vm)
             }
@@ -306,49 +323,282 @@ fun EpisodeRow(ep: Episode, watched: Boolean, onClick: () -> Unit, onLong: () ->
 // ============================================================ SEARCH
 
 @Composable
-fun SearchTab(vm: AppVM) {
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = vm.query,
-            onValueChange = { vm.onQuery(it) },
-            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-            shape = RoundedCornerShape(14.dp),
-            placeholder = { Text("Фильм, сериал или аниме") },
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Default.Search, null) },
-            trailingIcon = {
-                if (vm.query.isNotEmpty()) {
-                    IconButton(onClick = { vm.onQuery("") }) { Icon(Icons.Default.Close, null) }
+fun SearchScreen(vm: AppVM, onClose: () -> Unit) {
+    Surface(
+        Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
+                if (!vm.aiMode) {
+                    OutlinedTextField(
+                        value = vm.query,
+                        onValueChange = { vm.onQuery(it) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        placeholder = { Text("Фильм, сериал или аниме") },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        trailingIcon = {
+                            if (vm.query.isNotEmpty()) {
+                                IconButton(onClick = { vm.onQuery("") }) { Icon(Icons.Default.Close, null) }
+                            }
+                        },
+                    )
+                } else {
+                    Text(
+                        "Поиск по описанию",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f).padding(start = 4.dp),
+                    )
                 }
-            },
-        )
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf("all" to "Всё", "movie" to "Фильмы", "tv" to "Сериалы", "anime" to "Аниме").forEach { (k, l) ->
-                FilterChip(selected = vm.filter == k, onClick = { vm.onFilter(k) }, label = { Text(l) })
+            }
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 8.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (!vm.aiMode) {
+                    listOf("all" to "Всё", "movie" to "Фильмы", "tv" to "Сериалы", "anime" to "Аниме").forEach { (k, l) ->
+                        FilterChip(selected = vm.filter == k, onClick = { vm.onFilter(k) }, label = { Text(l) })
+                    }
+                }
+                FilterChip(selected = vm.aiMode, onClick = { vm.toggleAi() }, label = { Text("✨ По описанию") })
+            }
+
+            if (vm.aiMode) {
+                OutlinedTextField(
+                    value = vm.aiQuery,
+                    onValueChange = { vm.onAiQuery(it) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    minLines = 3,
+                    maxLines = 6,
+                    placeholder = { Text("Опишите фильм своими словами: сюжет, героев, что запомнилось…") },
+                )
+                Button(
+                    onClick = { vm.aiSearch() },
+                    enabled = !vm.aiLoading && vm.aiQuery.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                ) { Text(if (vm.aiLoading) "Ищу…" else "Подобрать") }
+                if (vm.aiLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                vm.aiError?.let { Text(it, color = Danger, modifier = Modifier.padding(horizontal = 16.dp)) }
+                ItemGrid(vm, vm.aiResults)
+            } else if (vm.query.isBlank()) {
+                Hint("Введите название или нажмите «✨ По описанию», чтобы найти фильм по сюжету.")
+            } else {
+                if (vm.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+                val err = vm.searchError
+                if (vm.results.isEmpty() && err != null && !vm.searching) {
+                    Hint(err)
+                } else {
+                    ItemGrid(vm, vm.results)
+                }
             }
         }
+    }
+}
 
-        if (vm.query.isBlank()) {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Подборка для вас", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = { vm.loadRecs() }) { Icon(Icons.Default.Refresh, null) }
+@Composable
+fun ListScreen(vm: AppVM) {
+    Surface(
+        Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { vm.closeList() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
+                Text(vm.listTitle ?: "", style = MaterialTheme.typography.titleMedium)
             }
-            if (vm.recsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (vm.recs.isEmpty() && !vm.recsLoading) {
-                Hint("Отметьте несколько просмотренных фильмов с оценкой — здесь появятся похожие рекомендации для вас обоих.")
-            } else {
-                ItemGrid(vm, vm.recs)
+            if (vm.listLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (!vm.listLoading && vm.listItems.isEmpty()) Hint("Ничего не найдено") else ItemGrid(vm, vm.listItems)
+        }
+    }
+}
+
+// ============================================================ EXPLORE
+
+@Composable
+fun RailCard(vm: AppVM, item: MediaItem) {
+    Column(Modifier.width(118.dp).clickable { vm.open(item) }) {
+        Box {
+            Poster(item.poster, item.title, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
+            item.rating?.let { PosterBadge(f1(it), true, Modifier.align(Alignment.TopEnd).padding(5.dp)) }
+            markOf(vm.entries[item.id])?.let { PosterBadge(it, false, Modifier.align(Alignment.TopStart).padding(5.dp)) }
+        }
+        Text(
+            item.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+@Composable
+fun Rail(vm: AppVM, title: String, items: List<MediaItem>?) {
+    if (items.isNullOrEmpty()) return
+    Column {
+        Text(
+            title, style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp),
+        )
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(items, key = { it.id }) { RailCard(vm, it) }
+        }
+    }
+}
+
+fun youtubeThumb(url: String): String? {
+    val id = url.substringAfter("v=", "").substringBefore("&")
+    return if (id.isBlank()) null else "https://img.youtube.com/vi/$id/hqdefault.jpg"
+}
+
+@Composable
+fun TrailerRail(list: List<Trailer>?) {
+    if (list.isNullOrEmpty()) return
+    val uri = LocalUriHandler.current
+    Column {
+        Text(
+            "Трейлеры", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp),
+        )
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(list, key = { it.item.id }) { t ->
+                Column(Modifier.width(250.dp).clickable { uri.openUri(t.url) }) {
+                    Box(
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        AsyncImage(
+                            model = youtubeThumb(t.url), contentDescription = t.item.title,
+                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                        )
+                        Box(
+                            Modifier.align(Alignment.Center).size(46.dp).clip(CircleShape).background(Color(0x99000000)),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("▶", color = Color.White, fontSize = 18.sp) }
+                    }
+                    Text(
+                        t.item.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
-        } else {
-            if (vm.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
-            val err = vm.searchError
-            if (vm.results.isEmpty() && err != null && !vm.searching) {
-                Hint(err)
-            } else {
-                ItemGrid(vm, vm.results)
+        }
+    }
+}
+
+@Composable
+fun GenreRail(vm: AppVM, kind: String, list: List<Genre>?) {
+    if (list.isNullOrEmpty()) return
+    Column {
+        Text(
+            "Жанры", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp),
+        )
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(list, key = { it.id }) { g ->
+                Box(
+                    Modifier.clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { vm.openGenre(kind, g) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                ) { Text(g.name, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExploreTab(vm: AppVM, onSearch: () -> Unit) {
+    val k = vm.exploreKind
+    LaunchedEffect(k) { vm.loadExplore(k) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Главная", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onSearch) { Icon(Icons.Default.Search, null) }
+            }
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Pill("Фильмы", k == "movie") { vm.setExploreKind("movie") }
+                Pill("Сериалы", k == "tv") { vm.setExploreKind("tv") }
+                Pill("Аниме", k == "anime") { vm.setExploreKind("anime") }
+            }
+        }
+        if (vm.exploreLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        item { Rail(vm, "Рекомендуем", vm.recs.filter { it.kind == k }) }
+        when (k) {
+            "movie" -> {
+                item { Rail(vm, "В тренде", vm.rails["movie/trending"]) }
+                item { Rail(vm, "Сейчас в кинотеатрах", vm.rails["movie/now"]) }
+                item { TrailerRail(vm.trailers["movie"]) }
+                item { Rail(vm, "Скоро в кинотеатрах", vm.rails["movie/soon"]) }
+                item { GenreRail(vm, "movie", vm.genres["movie"]) }
+                item { Rail(vm, "Популярное", vm.rails["movie/popular"]) }
+                item { Rail(vm, "Лучшее", vm.rails["movie/top"]) }
+            }
+            "tv" -> {
+                item { Rail(vm, "В тренде", vm.rails["tv/trending"]) }
+                item { TrailerRail(vm.trailers["tv"]) }
+                item { Rail(vm, "Сейчас в эфире", vm.rails["tv/air"]) }
+                item { GenreRail(vm, "tv", vm.genres["tv"]) }
+                item { Rail(vm, "Популярные", vm.rails["tv/popular"]) }
+                item { Rail(vm, "Лучшие", vm.rails["tv/top"]) }
+            }
+            else -> {
+                item { Rail(vm, "Популярное", vm.rails["anime/popular"]) }
+                item { Rail(vm, "Онгоинги", vm.rails["anime/ongoing"]) }
+                item { GenreRail(vm, "anime", vm.genres["anime"]) }
+                item { Rail(vm, "Скоро", vm.rails["anime/anons"]) }
+                item { Rail(vm, "Лучшие", vm.rails["anime/ranked"]) }
+            }
+        }
+    }
+}
+
+@Composable
+fun PeopleRow(title: String, people: List<Triple<Person, Int, Double>>) {
+    if (people.isEmpty()) return
+    Column {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(Modifier.height(8.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(people, key = { it.first.id }) { (p, n, pct) ->
+                Column(Modifier.width(84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier.size(76.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (p.photo != null) {
+                            AsyncImage(
+                                model = p.photo, contentDescription = p.name,
+                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Text(p.name.take(1), fontSize = 24.sp)
+                        }
+                    }
+                    Text(
+                        p.name, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Text(
+                        "$n / ${f1(pct)}%", fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -401,7 +651,7 @@ fun CountBlock(count: Int, label: String) {
 }
 
 @Composable
-fun MyTab(vm: AppVM) {
+fun MyTab(vm: AppVM, onSearch: () -> Unit) {
     var sub by remember { mutableIntStateOf(0) }
     val all = vm.entries.values
     val want = all.filter { it.status == "want" }.sortedByDescending { it.ts }
@@ -410,11 +660,16 @@ fun MyTab(vm: AppVM) {
         .sortedWith(compareByDescending<Entry> { it.status == "watching" }.thenByDescending { it.ts })
 
     Column(Modifier.fillMaxSize()) {
-        Text(
-            vm.myName.ifBlank { "Мой профиль" },
-            fontSize = 30.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                vm.myName.ifBlank { "Мой профиль" },
+                fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onSearch) { Icon(Icons.Default.Search, null) }
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -503,6 +758,22 @@ fun InfoTab(vm: AppVM) {
             StatCard(f1(hours), "Часов просмотра")
             StatCard(avg, "Средняя оценка")
         }
+
+        val denom = watched.size.coerceAtLeast(1)
+        fun top(pick: (CreditInfo) -> List<Person>): List<Triple<Person, Int, Double>> {
+            val counts = LinkedHashMap<Int, Pair<Person, Int>>()
+            for (e in watched) {
+                val ci = vm.credits[e.id] ?: continue
+                for (p in pick(ci)) {
+                    val cur = counts[p.id]
+                    counts[p.id] = p to ((cur?.second ?: 0) + 1)
+                }
+            }
+            return counts.values.filter { it.second >= 2 }.sortedByDescending { it.second }.take(10)
+                .map { Triple(it.first, it.second, it.second * 100.0 / denom) }
+        }
+        PeopleRow("Любимые актёры", top { it.actors })
+        PeopleRow("Любимые режиссёры", top { it.dirs })
 
         Column(Modifier.padding(horizontal = 16.dp)) {
             Text("Ваши оценки", style = MaterialTheme.typography.titleMedium)
@@ -682,6 +953,7 @@ fun SettingsTab(vm: AppVM) {
             if (!Tmdb.configured) "Не задан ключ TMDB — поиск не заработает." else null,
             if (!Omdb.configured) "Не задан ключ OMDb — рейтинг IMDb не будет показываться." else null,
             if (!Sync.configured) "Не настроен Firebase — пара не будет синхронизироваться." else null,
+            if (Keys.gemini.isBlank()) "Не задан ключ Gemini — поиск по описанию не заработает." else null,
         )
         if (warnings.isNotEmpty() && vm.keysVersion >= 0) { // keysVersion — чтобы список обновился после загрузки ключей
             Spacer(Modifier.height(8.dp))
@@ -715,6 +987,7 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
     val watching = entry?.status == "watching"
     val isSeries = shown.kind != "movie"
     val watchedEps = entry?.epSet() ?: emptySet()
+    val uriHandler = LocalUriHandler.current
     var season by remember(item.id) { mutableIntStateOf(1) }
     val curSeason = d?.seasons?.let { l -> l.firstOrNull { it.number == season } ?: l.firstOrNull() }
     LaunchedEffect(item.id, d?.item?.id, curSeason?.number) {
@@ -821,6 +1094,15 @@ fun DetailScreen(vm: AppVM, item: MediaItem) {
                     }
                     if (entry != null) {
                         TextButton(onClick = { vm.setStatus(shown, null) }) { Text("Убрать из моих списков") }
+                    }
+                }
+                val trailerUrl = d?.trailerUrl
+                if (trailerUrl != null) {
+                    item {
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri(trailerUrl) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("▶  Смотреть трейлер") }
                     }
                 }
                 if (partnerEntry != null) {
